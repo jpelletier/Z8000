@@ -2340,7 +2340,7 @@ eval_jp: is cc_jp
 # --- indirect ---
 # OUT @r1,r2
 :OUT @nib1,nib0 is op8=0x3F & nib1 & nib0 {}
-:OUTB @nib1,nib0, is op8=0x3E & nib1 & nib0 {}
+:OUTB @nib1,nib0 is op8=0x3E & nib1 & nib0 {}
 
 # --- direct address ---
 :OUT imm16,nib1 is op8=0x3B & nib1 & nib0=0x6; imm16 {}
