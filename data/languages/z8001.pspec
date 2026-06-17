@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<processor_spec>
+  <programcounter register="pc"/>
+  
+  <volatile outputop="write" inputop="read">
+    <range space="ram" first="0x0000" last="0x00FF"/> <!-- I/O space or special registers -->
+  </volatile>
+
+  <default_symbols>
+    <!-- Z8001 Hardware Reset and Exception Vector Table -->
+    <symbol name="RESET_FCW"        address="ram:0x0000" entry="false"/>
+    <symbol name="RESET_PC"         address="ram:0x0002" entry="true" type="code_ptr"/>
+    
+    <symbol name="SEG_TRAP_FCW"     address="ram:0x0006" entry="false"/>
+    <symbol name="SEG_TRAP_PC"      address="ram:0x0008" entry="true" type="code_ptr"/>
+
+    <symbol name="NMI_FCW"          address="ram:0x000C" entry="false"/>
+    <symbol name="NMI_PC"           address="ram:0x000E" entry="true" type="code_ptr"/>
+
+    <symbol name="NVI_FCW"          address="ram:0x0012" entry="false"/>
+    <symbol name="NVI_PC"           address="ram:0x0014" entry="true" type="code_ptr"/>
+
+    <symbol name="VI_FCW"           address="ram:0x0016" entry="false"/>
+    <symbol name="VI_PC"            address="ram:0x0018" entry="true" type="code_ptr"/>
+
+    <symbol name="SYSCALL_FCW"      address="ram:0x001C" entry="false"/>
+    <symbol name="SYSCALL_PC"       address="ram:0x001E" entry="true" type="code_ptr"/>
+  </default_symbols>
+
+  <default_memory_blocks>
+    <memory_block name="VECTOR_TABLE" start_address="ram:0x0000" length="0x0080" initialized="false" mode="r"/>
+    <memory_block name="RAM"          start_address="ram:0x0080" length="0x7F8000" initialized="false" mode="rwx"/>
+  </default_memory_blocks>
+</processor_spec>

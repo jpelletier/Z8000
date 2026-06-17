@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<language_definitions>
+    <language processor="Z8000"
+    	endian="big"
+	size="16"
+	variant="Z8001"
+	version="1.0"
+	slafile="z8001.sla"
+	processorspec="z8001.pspec"
+	id="Z8000:BE:16:Z8001">
+    	<description>Zilog Z8001 16-bit Segmented CPU</description>
+	<compiler name="default" spec="z8001.cspec" id="default"/>
+    </language>
+</language_definitions>
+

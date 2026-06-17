@@ -1,0 +1,3083 @@
+#FIXME add set flags to instructions
+#FIXME add check for nib1 != 0 where needed
+
+# ---------------------------------------------------------
+# CORE ARCHITECTURE DEFINITIONS
+# ---------------------------------------------------------
+define endian=big;
+define alignment=2;
+
+# 4 bytes tracking the 32-bit (Segment + Offset) storage space
+define space ram         type=ram_space      size=4 wordsize=2 default; 
+define space register    type=register_space size=4;
+
+# ---------------------------------------------------------
+# 8-bit registers (1 byte each,overlapping r0 through r7)
+define register offset=0x00 size=1 [ rh0 rl0 rh1 rl1 rh2 rl2 rh3 rl3 rh4 rl4 rh5 rl5 rh6 rl6 rh7 rl7 ];
+
+# 16-bit individual registers (Sequential, 2 bytes each, offsets 0x00-0x1F)
+define register offset=0x00 size=2 [ r0 r1 r2 r3 r4 r5 r6 r7 r8 r9 r10 r11 r12 r13 r14 r15 ];
+
+# 32-bit register pairs (Overlapping, 4 bytes each, offsets 0x00-0x1F)
+# Z8000 uses only even indices. We use underscores '_' to skip odd offset slots.
+define register offset=0x00 size=4 [ rr0 _ rr2 _ rr4 _ rr6 _ rr8 _ rr10 _ rr12 _ rr14 _ ];
+
+# 64-bit register quads (Overlapping, 8 bytes each, offsets 0x00-0x1F)
+# Z8000 uses indices divisible by 4. Underscores '_' skip the intermediate slots.
+define register offset=0x00 size=8 [ rq0 _ _ _ rq4 _ _ _ rq8 _ _ _ rq12 _ _ _ ];
+
+# ---------------------------------------------------------
+# Program Counter & System Registers
+# ---------------------------------------------------------
+# Placed safely outside the R0-R15 register file window (0x00 - 0x1F)
+define register offset=0x40 size=4 [ pc ];
+
+# Status Register (FCW)
+define register offset=0x200 size=2 [ DUMMY0 DUMMY1 FCW REFRESH PSAPSEG PSAPOFF NSPSEG NSPOFF ];
+
+# Slice flags from the 16-bit FCW register (Ghidra Index = 15 - Native_Z8000_Bit)
+define bitrange 
+    seg=FCW[0,1]  sys=FCW[1,1]  epa=FCW[2,1]  vie=FCW[3,1]  nvie=FCW[4,1]
+    cf=FCW[10,1]  zf=FCW[11,1]  sf=FCW[12,1]  pf=FCW[13,1]  df=FCW[14,1]
+    hf=FCW[15,1]  vf=FCW[13,1];
+
+# Define unmapped temporary registers for math operations
+define register offset=0x300 size=4 [ tmp_addr tmp_seg tmp_off ];
+
+# ---------------------------------------------------------
+# Tokens and Context
+# ---------------------------------------------------------
+define token opword (16)
+    op16     = ( 0,15)   # Full 16-bit word for exact opcode matching
+	op14	 = ( 2,15)	 # For DI, EI
+    op8      = ( 8,15)
+	op4  	 = (12,15)
+	ctlr	 = ( 0, 2)
+	#ctlr_val = ( 0, 2)  # Mirror field for constraints
+	dirr	 = ( 3, 3)
+    cc_jp  	 = ( 0, 3)
+    cc_jr  	 = ( 8,11)
+    imm16    = ( 0,15)
+	imm_sign = ( 15,15)
+    disp16   = ( 0,15)   signed
+    disp12   = ( 0,11)   signed
+	disp8	 = ( 0, 7)   signed
+	disp7	 = ( 0, 6)
+	byte0	 = ( 0, 7)
+
+	nib7	 = (12,15)
+    nib6	 = ( 8,11)
+	nib5	 = ( 4, 7)
+    nib4	 = ( 0, 3)
+	nib3	 = (12,15)
+    nib2	 = ( 8,11)
+	nib1	 = ( 4, 7)
+    nib0	 = ( 0, 3)
+
+	bnib7	 = (12,15)
+    bnib6	 = ( 8,11)
+	bnib5	 = ( 4, 7)
+    bnib4	 = ( 0, 3)
+	bnib3	 = (12,15)
+    bnib2	 = ( 8,11)
+	bnib1	 = ( 4, 7)
+    bnib0	 = ( 0, 3)
+
+	dnib5	 = ( 4, 7)
+	dnib1	 = ( 4, 7)
+    dnib0	 = ( 0, 3)
+	qnib1	 = ( 4, 7)
+    qnib0	 = ( 0, 3)
+
+    value0	 = ( 0, 3)
+	flg_all  = ( 4, 7)
+
+    flg_c    = ( 7, 7)  # Carry Flag bit
+    flg_z    = ( 6, 6)  # Zero Flag bit
+    flg_s    = ( 5, 5)  # Sign Flag bit
+    flg_v    = ( 4, 4)  # Overflow Flag bit
+
+	# Bits 0 and 1 specify which interrupts to target (Bit 1 = VI, Bit 0 = NVI)
+	int_mask = ( 0, 1)  # Combines both interrupt selection bits
+
+    int_vi   = ( 1, 1)  # For DI, EI
+    int_nvi  = ( 0, 0)  # For DI, EI
+
+	W        = ( 7, 7)  # DJNZ
+;
+
+define token extension (16)
+    # Additional common fields for Z8001 bit patterns
+    seg_num  = ( 8,14)  # 7-bit segment number
+	off8	 = ( 0, 7)   # 8-bit offset
+    off16    = ( 0,15)
+
+    size_bit = (11,11)
+    seg_bit  = (15,15) # Segmented flag bit
+;
+
+# Token for 32-bit fields (used for absolute segmented memory addresses/immediates)
+define token data32 (32)
+	imm32 = (0, 31)
+    imm32_seg = (16, 31)
+    imm32_off = (0, 15)
+;
+
+# ---------------------------------------------------------
+# Attach Sections
+# ---------------------------------------------------------
+attach names [ cc_jp cc_jr ] 
+[
+    "F" "LT" "LE" "ULE" "OV"  "MI" "Z"  "C"
+    "T" "GE" "GT" "UGT" "NOV" "PL" "NZ" "NC"
+];
+
+attach variables [ ctlr ]
+[
+	DUMMY0 DUMMY1 FCW REFRESH PSAPSEG PSAPOFF NSPSEG NSPOFF
+];
+
+attach variables [ nib0 nib1 nib2 nib5 nib6]
+[
+    r0  r1  r2  r3  r4  r5  r6  r7 
+    r8  r9  r10 r11 r12 r13 r14 r15 
+];
+
+attach variables [ bnib0 bnib1 bnib2 bnib5 bnib6]
+[
+    rh0  rh1  rh2  rh3  rh4  rh5  rh6  rh7 
+    rl0  rl1  rl2  rl3  rl4  rl5  rl6  rl7 
+];
+
+# Map 4-bit token indices to 32-bit register pairs for indirect memory instructions
+# Z8000 uses even-numbered register indices for 32-bit pairs (rr0, rr2, etc.)
+attach variables [ dnib0 dnib1 dnib5 ] 
+[
+    rr0 _ rr2 _ rr4 _ rr6 _
+    rr8 _ rr10 _ rr12 _ rr14 _
+];
+
+# Map 4-bit token indices to 64-bit register quads for indirect memory instructions
+# Z8000 uses even-numbered register indices for 64-bit quads (rq0, rq4, etc.)
+attach variables [ qnib0 qnib1 ] 
+[
+    rq0 _ _ _ rq4 _ _ _
+    rq8 _ _ _ rq12 _ _ _
+];
+
+# Attach the displacement relative calculation to a target operand
+rel12: RelAddr12 is disp12
+[
+	RelAddr12 = inst_next + disp12;
+]{ export RelAddr12; }
+
+# Attach the displacement relative calculation to a target operand
+rel8: RelAddr8 is disp8 
+[
+	RelAddr8 = inst_next + disp8;
+]{ export RelAddr8; }
+
+rel7: RelAddr7 is disp7 
+[
+	RelAddr7 = inst_next - disp7;
+]{ export RelAddr7; }
+
+# ---------------------------------------------------------
+# Macros
+# ---------------------------------------------------------
+# 24-bit/32-bit Segmented Address Parsing (Decoding the Z8001 Intersegment formatting)
+Addr32: seg_num, off16 is seg_bit=1 & seg_num; off16 
+{
+    local tmp:4 = (seg_num << 16) | off16;
+    export tmp;
+}
+
+Addr32: off16 is seg_bit=0 & off16 
+{
+    # Short segment form (implied segment or 8-bit offset form)
+    local tmp:4 = off16;
+    export tmp;
+}
+
+# Macro: Reconstruct a linear 32-bit address from a Z8001 segment/offset pair
+# Input: 32-bit register pair or memory pointer (e.g., RR2 or a long pointer)
+macro getLinearAddress(ptr32, result) 
+{
+    # Extract segment: bits 16-22 of the 32-bit layout (Big Endian)
+    tmp_seg = (ptr32 >> 16) & 0x7F;
+    
+    # Extract offset: lowest 16 bits
+    tmp_off = ptr32 & 0xFFFF;
+    
+    # Calculate linear address: (Segment * 0x10000) + Offset
+    result = (tmp_seg << 16) + tmp_off;
+}
+
+macro push16(val) 
+{
+    # 1. Decrement the 16-bit offset portion of the Stack Pointer (rr14 low half)
+    r15 = r15 - 2:2;
+    
+    # 2. Store the 16-bit value onto the RAM space at the address formed by rr14
+    *:2 rr14 = val;
+}
+
+macro push32(val) 
+{
+    # 1. Decrement the 16-bit offset portion of the Stack Pointer by 4 bytes
+    r15 = r15 - 4:2;
+    
+    # 2. Store the 32-bit value onto the RAM space at the address formed by rr14
+    *:4 rr14 = val;
+}
+
+macro pop16(dst) 
+{
+    # 1. Read the 16-bit value from RAM at the current rr14 address
+    dst = *:2 rr14;
+    
+    # 2. Increment the 16-bit offset portion of the Stack Pointer (r15)
+    r15 = r15 + 2:2;
+}
+
+macro pop32(dst) 
+{
+    # 1. Read the 32-bit value from RAM at the current rr14 address
+    dst = *:4 rr14;
+    
+    # 2. Increment the 16-bit offset portion of the Stack Pointer (r15)
+    r15 = r15 + 4:2;
+}
+
+# Global macro to compute and set Z8001 Zero and Sign flags
+macro set_ZS_b(result) 
+{
+    zf = (result == 0:1);
+    sf = ((result & 0x80:1) != 0:1);
+}
+
+macro set_ZS_w(result) 
+{
+    zf = (result == 0:2);
+    sf = ((result & 0x8000:2) != 0:2);
+}
+
+macro set_ZS_d(result) 
+{
+    zf = (result == 0:4);
+    sf = ((result & 0x80000000:4) != 0:4);
+}
+
+macro dynamic_jump(target) 
+{
+    goto [target];
+}
+
+# Create a macro that performs the conditional calculation
+macro check_base_cc(base,z,s,v,c,result) 
+{
+    if (base == 0) goto <c0>;
+    if (base == 1) goto <c1>;
+    if (base == 2) goto <c2>;
+    if (base == 3) goto <c3>;
+    if (base == 4) goto <c4>;
+    if (base == 5) goto <c5>;
+    if (base == 6) goto <c6>;
+    result = z; goto <exit>; # Fallback for base == 7
+
+    <c0> result = 0; goto <exit>;
+    <c1> result = (z | (s ^ v)); goto <exit>;
+    <c2> result = (s ^ v); goto <exit>;
+    <c3> result = c; goto <exit>;
+    <c4> result = s; goto <exit>;
+    <c5> result = v; goto <exit>;
+    <c6> result = c; goto <exit>;
+    
+    <exit>
+}
+
+# ---------------------------------------------------------
+# Subtables
+# ---------------------------------------------------------
+flg_list: ""        is flg_all=0x0 {}
+flg_list: "v"       is flg_all=0x1 {}
+flg_list: "s"       is flg_all=0x2 {}
+flg_list: "s,v"     is flg_all=0x3 {}
+flg_list: "z"       is flg_all=0x4 {}
+flg_list: "z,v"     is flg_all=0x5 {}
+flg_list: "z,s"     is flg_all=0x6 {}
+flg_list: "z,s,v"   is flg_all=0x7 {}
+flg_list: "c"       is flg_all=0x8 {}
+flg_list: "c,v"     is flg_all=0x9 {}
+flg_list: "c,s"     is flg_all=0xA {}
+flg_list: "c,s,v"   is flg_all=0xB {}
+flg_list: "c,z"     is flg_all=0xC {}
+flg_list: "c,z,v"   is flg_all=0xD {}
+flg_list: "c,z,s"   is flg_all=0xE {}
+flg_list: "c,z,s,v" is flg_all=0xF {}
+
+# VI:  1
+# NVI: 0
+int_list: ""        is int_mask=0x3 {}
+int_list: "NVI"     is int_mask=0x2 {}
+int_list: "VI"      is int_mask=0x1 {}
+int_list: "VI,NVI" is int_mask=0x0 {}
+
+# SUBTABLE 1: Jump Relative (JR)
+eval_jr: is cc_jr 
+{
+	local raw_cc:1 = cc_jr;
+    local base:1 = raw_cc & 0x07;
+    local cond:1 = 0;
+    check_base_cc(base,zf,sf,vf,cf,cond);
+    if (raw_cc >= 8) goto <done>;
+    cond = !cond;
+    <done>
+    export cond;
+}
+
+# SUBTABLE 2: Jump Absolute (JP)
+eval_jp: is cc_jp 
+{
+	local raw_cc:1 = cc_jp;
+    local base:1 = raw_cc & 0x07;
+    local cond:1 = 0;
+    check_base_cc(base,zf,sf,vf,cf,cond);
+    if (raw_cc >= 8) goto <done>;
+    cond = !cond;
+    <done>
+    export cond;
+}
+
+# ---------------------------------------------------------
+# Instructions
+# ---------------------------------------------------------
+# --- registers  ---
+# ADC r1,r2
+:ADC nib0,nib1 is op8=0xB5 & nib1 & nib0 
+{
+    nib0 = nib0 + nib1;
+}
+
+# ADCB rx1,rx2
+:ADCB bnib0,bnib1 is op8=0xB4 & bnib1 & bnib0 
+{
+    bnib0 = bnib0 + bnib1;
+}
+
+# --- registers  ---
+# ADD r1,r2
+:ADD nib0,nib1 is op8=0x81 & nib1 & nib0 
+{
+    nib0 = nib0 + nib1;
+}
+
+# ADDB rx1,rx2
+:ADDB bnib0,bnib1 is op8=0x80 & bnib1 & bnib0 
+{
+    bnib0 = bnib0 + bnib1;
+}
+
+# ADDL rr1,rr2
+:ADDL dnib0,dnib1 is op8=0x96 & dnib0 & dnib1 
+{
+    dnib0 = dnib0 + dnib1;
+}
+
+# --- immediate ---
+# ADD r1,#val16
+:ADD nib0,#imm16 is op8=0x01 & nib1=0 & nib0; imm16 
+{
+    local imm_val:2 = imm16;
+    nib0 = nib0 + imm_val;
+}
+
+# ADDB r1,#val16
+:ADDB bnib0,#imm16 is op8=0x00 & nib1=0 & bnib0; imm16 
+{
+    local imm_val:1 = imm16;
+    bnib0 = bnib0 + imm_val;
+}
+
+# ADDL r1,#val32
+:ADDL dnib0,#imm32 is op8=0x16 & dnib1=0 & dnib0; imm32 
+{
+    local imm_val:4 = imm32;
+    dnib0 = dnib0 + imm_val;
+}
+
+# --- indirect reg ---
+# ADD r1,@r2
+:ADD nib0,@dnib1 is op8=0x01 & dnib1 & nib0 
+{
+    local addr:4 = dnib1;
+    local mem_val:2 = *[ram]:2 addr;
+
+    nib0 = nib0 + mem_val;
+}
+
+# ADDB r1,@r2
+:ADDB bnib0,@dnib1 is op8=0x00 & dnib1 & bnib0 
+{
+    local addr:4 = dnib1;
+    local mem_val:1 = *[ram]:1 addr;
+
+    bnib0 = bnib0 + mem_val;
+}
+
+# ADDL r1,@r2
+:ADDL dnib0,@dnib1 is op8=0x16 & dnib1 & dnib0 
+{
+    local addr:4 = dnib1;
+    local mem_val:4 = *[ram]:4 addr;
+
+    dnib0 = dnib0 + mem_val;
+}
+
+# --- direct address ---
+# ADD r1,Addr32
+:ADD nib0,Addr32 is op8=0x41 & nib1=0 & nib0; Addr32 
+{
+    nib0 = nib0 + *[ram]Addr32;
+}
+
+# ADDB r1,Addr32
+:ADDB bnib0,Addr32 is op8=0x40 & nib1=0 & bnib0; Addr32 
+{
+    bnib0 = bnib0 + *[ram]Addr32;
+}
+
+# ADDL r1,Addr32
+:ADDL dnib0,Addr32 is op8=0x56 & nib1=0 & dnib0; Addr32 
+{
+    dnib0 = dnib0 + *[ram]Addr32;
+}
+
+# --- indexed address ---
+# ADD r1,Addr32(rs)
+:ADD nib0,Addr32(nib1) is op8=0x41 & nib1 & nib0; Addr32 
+{
+    local addr:4 = zext(nib1);
+    local mem_val = *[ram](addr + zext(nib1));
+
+    nib0 = nib0 + mem_val;
+}
+
+# ADDB r1,Addr32(rs)
+:ADDB bnib0,Addr32(nib1) is op8=0x40 & nib1 & bnib0; Addr32 
+{
+    local addr:4 = zext(nib1);
+    local mem_val:1 = *[ram]:1 (addr + zext(nib1));
+
+    bnib0 = bnib0 + mem_val;
+}
+
+# ADDL rr1,Addr32(rs)
+:ADDL dnib0,Addr32(nib1) is op8=0x56 & nib1 & dnib0; Addr32 
+{
+    local addr:4 = zext(nib1);
+    local mem_val:4 = *[ram]:4 (addr + zext(nib1));
+
+    dnib0 = dnib0 + mem_val;
+}
+
+# p60
+# --- registers  ---
+# AND r1,r2
+:AND nib0,nib1 is op8=0x87 & nib1 & nib0 
+{
+    nib0 = nib0 & nib1;
+}
+
+# ANDB r1,r2
+:ANDB bnib0,bnib1 is op8=0x86 & bnib1 & bnib0 
+{
+    bnib0 = bnib0 & bnib1;
+}
+
+# --- immediate ---
+# AND r1,#val16
+:AND nib0,#imm16 is op8=0x07 & nib1=0 & nib0; imm16 
+{
+    local imm_val:2 = imm16;
+    nib0 = nib0 & imm_val;
+}
+
+# ANDB r1,#val16
+:ANDB bnib0,#imm16 is op8=0x06 & nib1=0 & bnib0; imm16 
+{
+    local imm_val = imm16;
+    bnib0 = bnib0 & imm_val;
+}
+
+# --- indirect reg ---
+# AND r1,@r2
+:AND nib0,@dnib1 is op8=0x07 & dnib1 & nib0 
+{
+    local addr:4 = dnib1;
+    local mem_val:2 = *[ram]:2 addr;
+    nib0 = nib0 & mem_val;
+}
+
+# ANDB r1,@r2
+:ANDB bnib0,@dnib1 is op8=0x06 & dnib1 & bnib0 
+{
+    local addr:4 = dnib1;
+    local mem_val = *[ram]addr;
+    bnib0 = bnib0 & mem_val;
+}
+
+# --- direct address ---
+# AND r1,Addr32
+:AND nib0,Addr32 is op8=0x47 & nib1=0 & nib0; Addr32 
+{
+    nib0 = nib0 & *[ram]Addr32;
+}
+
+# ANDB r1,Addr32
+:ANDB bnib0,Addr32 is op8=0x46 & nib1=0 & bnib0; Addr32 
+{
+    bnib0 = bnib0 & *[ram]Addr32;
+}
+
+# --- indexed address ---
+# AND r1,Addr32(rs)
+:AND nib0,Addr32(nib1) is op8=0x47 & nib1 & nib0; Addr32 
+{
+    local addr:4 = zext(nib1);
+    local mem_val:2 = *[ram]:2 (addr + zext(nib1));
+    nib0 = nib0 & mem_val:2;
+}
+
+# ANDB r1,Addr32(rs)
+:ANDB bnib0,Addr32(nib1) is op8=0x46 & nib1 & bnib0; Addr32 
+{
+    local addr:4 = zext(nib1);
+    local mem_val = *[ram](addr + zext(nib1));
+    bnib0 = bnib0 & mem_val;
+}
+
+#BIT p 62
+# === dynamic ===
+# --- registers  ---
+# BIT r1,r2
+:BIT nib2,nib0 is op8=0x27 & nib1=0 & nib0; nib3=0 & nib2 & byte0=0 
+{
+    local mask:2 = 1 << nib0;
+    zf = ((nib2 & mask) == 0);
+}
+
+# BITB r1,r2
+:BITB bnib2,nib0 is op8=0x26 & nib1=0 & nib0; nib3=0 & bnib2 & byte0=0 
+{
+    local mask:1 = 1 << nib0;
+    zf = ((bnib2 & mask) == 0);
+}
+
+# === static ===
+# --- registers ---
+# BIT r1,#bit_index
+:BIT nib1,#nib0 is op8=0xA7 & nib1 & nib0 
+{
+    local mask:2 = 1 << nib0;
+    zf = ((nib1 & mask) == 0);
+}
+
+# BITB r1,#bit_index
+:BITB bnib1,#nib0 is op8=0xA6 & bnib1 & nib0 
+{
+    local mask:1 = 1 << nib0;
+    zf = ((bnib1 & mask) == 0);
+}
+
+# --- indirect reg ---
+# BIT @r1,#bit_index
+:BIT @dnib1,#nib0 is op8=0x27 & dnib1 & nib0 
+{
+    local addr:4 = dnib1;
+	local tmp:2 = *[ram]:2 addr;
+    local mask:2 = 1 << nib0;
+    zf = ((tmp & mask) == 0);
+}
+
+# BITB @r1,#bit_index
+:BITB @dnib1,#nib0 is op8=0x26 & dnib1 & nib0 
+{
+    local addr:4 = dnib1;
+	local tmp:1 = *[ram]:1 addr;
+    local mask:1 = 1 << nib0;
+    zf = ((tmp & mask) == 0);
+}
+
+# --- direct address ---
+# BIT Addr32,#bit_index
+:BIT Addr32,#nib0 is op8=0x67 & nib1=0 & nib0; Addr32 
+{
+	local tmp:2 = *[ram]:2 Addr32;
+    local mask:2 = 1 << nib0;
+    zf = ((tmp & mask) == 0);
+}
+
+# BITB Addr32,#bit_index
+:BITB Addr32,#nib0 is op8=0x66 & nib1=0 & nib0; Addr32 
+{
+	local tmp:1 = *[ram]:2 Addr32;
+    local mask:1 = 1 << nib0;
+    zf = ((tmp & mask) == 0);
+}
+
+# --- indexed address ---
+# BIT Addr32(rs),#bit_index
+:BIT Addr32(nib1),#nib0 is op8=0x67 & nib1 & nib0; Addr32 
+{
+    local addr:4 = zext(nib1);
+    local tmp:2 = *[ram]:2 (addr + zext(nib1));
+    *[ram]:2 (addr + zext(nib1)) = 0;
+    local mask:2 = 1 << nib0;
+    zf = ((tmp & mask) == 0);
+}
+
+# BITB Addr32(rs),#bit_index
+:BITB Addr32(nib1),#nib0 is op8=0x66 & nib1 & nib0; Addr32 
+{
+    local addr:4 = zext(nib1);
+    local tmp:1 = *[ram]:1 (addr + zext(nib1));
+    *[ram]:1 (addr + zext(nib1)) = 0;
+    local mask:1 = 1 << nib0;
+    zf = ((tmp & mask) == 0);
+}
+
+#CALL p 64
+# CALL @rr1
+:CALL @dnib1 is op8=0x1F & dnib1 & nib0=0 
+{
+	local target:4 = dnib1;
+    call [target];
+}
+
+# CALL Addr32
+:CALL Addr32 is op16=0x5F00; Addr32 
+{
+    call [Addr32];
+}
+
+#CALL Addr32(rd)
+:CALL Addr32(nib1) is op8=0x5F & nib1 & nib0=0; Addr32 
+{
+    local addr:4 = zext(nib1);
+    local tmp:4 = *[ram]:4 (addr + zext(nib1));
+	call [tmp];
+}
+
+#CALR p 65
+:CALR rel12 is op4=0xD & rel12 
+{
+    call rel12;
+}
+
+#CLR p 66
+# --- registers  ---
+# CLR r1
+:CLR nib1 is op8=0x8D & nib1 & nib0=0x8 
+{
+    nib1 = 0;
+}
+
+# CLRB r1
+:CLRB bnib1 is op8=0x8C & bnib1 & nib0=0x8 
+{
+    bnib1 = 0;
+}
+
+# --- indirect reg ---
+# CLR @r1
+:CLR @dnib1 is op8=0x0D & dnib1 & nib0=0x8 
+{
+    local addr:4 = dnib1;
+    *[ram]:2 addr = 0;
+}
+
+# CLRB @r1
+:CLRB @dnib1 is op8=0x0C & dnib1 & nib0=0x8 
+{
+    local addr:4 = dnib1;
+    *[ram]:1 addr = 0;
+}
+
+# --- direct address ---
+# CLR Addr32
+:CLR Addr32 is op16=0x4D08; Addr32 
+{
+	*[ram]:2 Addr32 = 0;
+}
+
+# CLRB Addr32
+:CLRB Addr32 is op16=0x4C08; Addr32 
+{
+	*[ram]:1 Addr32 = 0;
+}
+
+# --- indexed address ---
+# CLR Addr32(rs)
+:CLR Addr32(nib1) is op8=0x4D & nib1 & nib0=0x8; Addr32 
+{
+    local addr:4 = zext(nib1);
+    local mem_val:2 = *[ram]:2 (addr + zext(nib1));
+
+    *[ram]:2 (addr + zext(nib1)) = 0;
+}
+
+# CLRB Addr32(rs)
+:CLRB Addr32(nib1) is op8=0x4C & nib1 & nib0=0x8; Addr32 
+{
+    local addr:4 = zext(nib1);
+    local mem_val:1 = *[ram]:1 (addr + zext(nib1));
+
+    *[ram]:1 (addr + zext(nib1)) = 0;
+}
+
+# COM p 67
+# COM r1
+:COM nib1 is op8=0x8D & nib1 & nib0=0 
+{
+    nib1 = ~nib1;
+}
+
+# COMB r1
+:COMB bnib1 is op8=0x8C & bnib1 & nib0=0 
+{
+    bnib1 = ~bnib1;
+}
+
+# --- indirect reg ---
+# COM @r1
+:COM @dnib1 is op8=0x0D & dnib1 & nib0=0 
+{
+    local addr:4 = dnib1;
+    local mem_val:2 = *[ram]:2 addr;
+	local res:2 = ~mem_val;
+    dnib1 = zext(res);
+}
+
+# COMB @r1
+:COMB @dnib1 is op8=0x0C & dnib1 & nib0=0 
+{
+    local addr:4 = dnib1;
+    local mem_val:1 = *[ram]:1 addr;
+	local res:1 = ~mem_val;
+    dnib1 = zext(res);
+}
+
+# --- direct address ---
+# COM Addr32
+:COM Addr32 is op8=0x4D & nib1=0 & nib0=0; Addr32 
+{
+    local mem_val:2 = *[ram]Addr32;
+	*[ram]Addr32 = ~mem_val;
+}
+
+# COMB Addr32
+:COMB Addr32 is op8=0x4C & nib1=0 & nib0=0; Addr32 
+{
+    local mem_val:1 = *[ram]Addr32;
+	*[ram]Addr32 = ~mem_val;
+}
+
+# --- indexed address ---
+# COM Addr32(rs)
+:COM Addr32(nib1) is op8=0x4D & nib1 & nib0=0; Addr32 
+{
+    local addr:4 = zext(nib1);
+    local mem_val:2 = *[ram]:2 (addr + zext(nib1));
+
+    *[ram]:2 (addr + zext(nib1)) = ~mem_val;
+}
+
+# COMB Addr32(rs)
+:COMB Addr32(nib1) is op8=0x4C & nib1 & nib0=0; Addr32 
+{
+    local addr:4 = zext(nib1);
+    local mem_val:1 = *[ram]:1 (addr + zext(nib1));
+
+    *[ram]:1 (addr + zext(nib1)) = ~mem_val;
+}
+
+# p 68
+#COMFLAG
+:COMFLG flg_list is op8=0x8D & flg_list & flg_c & flg_z & flg_s & flg_v & nib0=0x5 
+{
+	cf = cf ^ flg_c;
+    zf = zf ^ flg_z;
+    sf = sf ^ flg_s;
+    vf = vf ^ flg_v;
+}
+
+# CP p 69
+# --- registers  ---
+# CP r1,r2
+:CP nib0,nib1 is op8=0x8B & nib1 & nib0 
+{
+	#FIXME function not implemented
+    #zf = (nib0 == nib1);
+    #sf = (nib0 < nib1);
+}
+
+# CPB rx1,rx2
+:CPB bnib0,nib1 is op8=0x8A & nib1 & bnib0 
+{
+	#FIXME function not implemented
+    #bnib0 = bnib0 - nib1;
+}
+
+# CPL rr1,rr2
+:CPL dnib0,dnib1 is op8=0x90 & dnib0 & dnib1 
+{
+	#FIXME function not implemented
+    #dnib0 = dnib0 - dnib1;
+}
+
+# --- immediate ---
+# CP r1,#val16
+:CP nib0,#imm16 is op8=0x0B & nib1=0 & nib0; imm16 
+{
+    local imm_val:2 = imm16;
+	#FIXME function not implemented
+    #nib0 = nib0 - imm_val;
+}
+
+# CPB r1,#val16
+:CPB bnib0,#imm16 is op8=0x0A & nib1=0 & bnib0; imm16 
+{
+    local imm_val:1 = imm16;
+	#FIXME function not implemented
+    #bnib0 = bnib0 - imm_val;
+}
+
+# CPL r1,#val32
+:CPL dnib0,#imm32 is op8=0x10 & dnib1=0 & dnib0; imm32 
+{
+    local imm_val:4 = imm32;
+	#FIXME function not implemented
+    #dnib0 = dnib0 - imm_val;
+}
+
+# --- indirect reg ---
+# CP r1,@r2
+:CP nib0,@dnib1 is op8=0x0B & dnib1 & nib0 
+{
+    local addr:4 = dnib1;
+    local mem_val:2 = *[ram]:2 addr;
+
+	#FIXME function not implemented
+    #nib0 = nib0 - mem_val;
+}
+
+# CPB r1,@r2
+:CPB bnib0,@dnib1 is op8=0x0A & dnib1 & bnib0 
+{
+    local addr:4 = dnib1;
+    local mem_val:2 = *[ram]:1 addr;
+
+	#FIXME function not implemented
+    #bnib0 = bnib0 - mem_val;
+}
+
+# CPL r1,@r2
+:CPL dnib0,@dnib1 is op8=0x10 & dnib1 & dnib0 
+{
+    local addr:4 = dnib1;
+    local mem_val:4 = *[ram]:4 addr;
+
+	#FIXME function not implemented
+    #dnib0 = dnib0 - mem_val;
+}
+
+# --- direct address ---
+# CP r1,Addr32
+:CP nib0,Addr32 is op8=0x4B & nib1=0 & nib0; Addr32 
+{
+	#FIXME function not implemented
+    #nib0 = nib0 - *[ram]Addr32;
+}
+
+# CPB r1,Addr32
+:CPB bnib0,Addr32 is op8=0x4A & nib1=0 & bnib0; Addr32 
+{
+	#FIXME function not implemented
+    #bnib0 = bnib0 - *[ram]Addr32;
+}
+
+# CPL rr1,Addr32
+:CPL dnib0,Addr32 is op8=0x50 & nib1=0 & dnib0; Addr32 
+{
+	#FIXME function not implemented
+    #dnib0 = dnib0 - *[ram]Addr32;
+}
+
+# --- indexed address ---
+# CP r1,Addr32(rs)
+:CP nib0,Addr32(nib1) is op8=0x4B & nib1 & nib0; Addr32 
+{
+    local addr:4 = zext(nib1);
+    local mem_val:2 = *[ram]:2 (addr + zext(nib1));
+
+	#FIXME function not implemented
+    #nib0 = nib0 - mem_val:2;
+}
+
+# CPB r1,Addr32(rs)
+:CPB bnib0,Addr32(nib1) is op8=0x4A & nib1 & bnib0; Addr32 
+{
+    local addr:4 = zext(nib1);
+    local mem_val:1 = *[ram]:1 (addr + zext(nib1));
+
+	#FIXME function not implemented
+    #bnib0 = bnib0 - zext(mem_val);
+}
+
+# CPL rr1,Addr32(rs)
+:CPL dnib0,Addr32(nib1) is op8=0x50 & nib1 & dnib0; Addr32 
+{
+    local addr:4 = zext(nib1);
+    local mem_val:4 = *[ram]:4 (addr + zext(nib1));
+
+	#FIXME function not implemented
+    #dnib0 = dnib0 - mem_val;
+}
+
+# p 70
+# --- indirect reg ---
+# CP @r1,#data
+:CP @dnib1,#imm16 is op8=0x0D & dnib1 & nib0=1; imm16 
+{
+	#FIXME function not implemented
+    #dnib0 = dnib0 - *[ram]Addr32;
+}
+
+:CPB @dnib1,#imm16 is op8=0x0C & dnib1 & nib0=1; imm16 
+{
+	#FIXME function not implemented
+    #dnib0 = dnib0 - *[ram]Addr32;
+}
+
+# --- direct address ---
+# CP DA,IM p 71
+# CP Addr32,#data
+:CP Addr32,#imm16 is op16=0x4D01; Addr32; imm16 
+{
+	#FIXME function not implemented
+    #dnib0 = dnib0 - *[ram]Addr32;
+}
+
+# CPB Addr32,#data
+:CPB Addr32,#imm16 is op16=0x4C01; Addr32; imm16 
+{
+	#FIXME function not implemented
+    #dnib0 = dnib0 - *[ram]Addr32;
+}
+
+# --- indexed address ---
+# CP Addr32(rd),#data
+:CP Addr32(nib1),#imm16 is op8=0x4D & nib1 & nib0=1; Addr32; imm16 
+{
+    local addr:4 = zext(nib1);
+    local mem_val:2 = *[ram]:2 (addr + zext(nib1));
+
+	#FIXME function not implemented
+    #nib0 = nib0 - mem_val:2;
+}
+
+# CPB Addr32(rd),#data
+:CPB Addr32(nib1),#imm16 is op8=0x4C & nib1 & nib0=1; Addr32; imm16 
+{
+    local addr:4 = zext(nib1);
+    local mem_val:2 = *[ram]:2 (addr + zext(nib1));
+
+	#FIXME function not implemented
+    #nib0 = nib0 - mem_val:2;
+}
+
+# =============================================================================
+# CPI / CPD: Single-Step String Operations
+# =============================================================================
+# p 72
+# CPD: Compare and Decrement
+:CPD nib5,@dnib1,nib6,cc_jp is op8=0xBB & dnib1 & nib0=0x8; nib7=0 & nib6 & nib5 & eval_jp & cc_jp 
+{
+#    local mem_byte:1 = *[ram]dnib1;
+#    local src_byte:1 = nib5:1;
+    
+#    zf = (src_byte == mem_byte);
+#    sf = (src_byte < mem_byte);
+    
+#    nib6 = nib6 - 1:2;
+#    vf = (nib6 != 0:2);
+#    dnib1 = dnib1 - 2:4;
+}
+
+# CPDB: Compare and Decrement
+:CPDB bnib5,@dnib1,nib6,cc_jp is op8=0xBA & dnib1 & nib0=0x8; nib7=0 & nib6 & bnib5 & eval_jp & cc_jp 
+{
+#    local mem_byte = *[ram]dnib1;
+#    local src_byte = bnib5;
+#    
+#    zf = (src_byte == mem_byte);
+#    sf = (src_byte < mem_byte);
+    
+#    nib6 = nib6 - 1:2;
+#    vf = (nib6 != 0:2);
+#    dnib1 = dnib1 - 1:4;
+}
+
+# p 73
+# CPDR: Compare,Decrement,and Repeat
+:CPDR nib5,@dnib1,nib6,cc_jp is op8=0xBB & dnib1 & nib0=0xC; nib7=0 & nib6 & nib5 & eval_jp & cc_jp  
+{
+    <loop_start>
+    local mem_byte:1 = *[ram]dnib1;
+    local src_byte:1 = nib5:1;
+    
+    zf = (src_byte == mem_byte);
+    sf = (src_byte < mem_byte);
+    
+    nib6 = nib6 - 1:2;
+    vf = (nib6 != 0:2);
+    dnib1 = dnib1 - 2:4;
+    
+    if (vf && !zf) goto <loop_start>;
+}
+
+# CPDRB: Compare,Decrement,and Repeat
+:CPDRB bnib5,@dnib1,nib6,cc_jp is op8=0xBA & dnib1 & nib0=0xC; nib7=0 & nib6 & bnib5 & eval_jp & cc_jp  
+{
+    <loop_start>
+    local mem_byte:1 = *[ram]dnib1;
+    local src_byte = bnib5;
+    
+    zf = (src_byte == mem_byte);
+    sf = (src_byte < mem_byte);
+    
+    nib6 = nib6 - 1:2;
+    vf = (nib6 != 0:2);
+    dnib1 = dnib1 - 1:4;
+    
+    if (vf && !zf) goto <loop_start>;
+}
+
+# p 74
+# CPI: Compare and Increment
+:CPI nib5,@dnib1,nib6,cc_jp is op8=0xBB & dnib1 & nib0=0; nib7=0 & nib6 & nib5 & eval_jp & cc_jp 
+{
+    local mem_byte:1 = *[ram]dnib1;
+    local src_byte:1 = nib5:1;
+    
+    zf = (src_byte == mem_byte);
+    sf = (src_byte < mem_byte);
+    
+    nib6 = nib6 - 1:2;
+    vf = (nib6 != 0:2);
+    dnib1 = dnib1 + 2:4;
+}
+
+# CPIB: Compare and Increment
+:CPIB nib5,@dnib1,nib6,cc_jp is op8=0xBA & dnib1 & nib0=0; nib7=0 & nib6 & nib5 & eval_jp & cc_jp 
+{
+    local mem_byte:1 = *[ram]dnib1;
+    local src_byte:1 = nib5:1;
+    
+    zf = (src_byte == mem_byte);
+    sf = (src_byte < mem_byte);
+    
+    nib6 = nib6 - 1:2;
+    vf = (nib6 != 0:2);
+    dnib1 = dnib1 + 1:4;
+}
+
+# p 76
+# =============================================================================
+# CPIR / CPDR: Repeating String Operations
+# =============================================================================
+#:TCC cc_jp,nib1 is op8=0xAF & nib1 & eval_jp & cc_jp {}
+
+# CPIR: Compare,Increment,and Repeat
+:CPIR nib5,@dnib1,nib6,cc_jp is op8=0xBB & dnib1 & nib0=0x4; nib7=0 & nib6 & nib5 & eval_jp & cc_jp 
+{
+    <loop_start>
+    local mem_byte:1 = *[ram]dnib1;
+    local src_byte:1 = nib5:1;
+    
+    zf = (src_byte == mem_byte);
+    sf = (src_byte < mem_byte);
+    
+    nib6 = nib6 - 1:2;
+    vf = (nib6 != 0:2);
+    dnib1 = dnib1 + 2:4;
+    
+    if (vf && !zf) goto <loop_start>;
+}
+
+# CPIRB: Compare,Increment,and Repeat
+:CPIRB nib5,@dnib1,nib6,cc_jp is op8=0xBA & dnib1 & nib0=0x4; nib7=0 & nib6 & nib5 & eval_jp & cc_jp 
+{
+    <loop_start>
+    local mem_byte:1 = *[ram]dnib1;
+    local src_byte:1 = nib5:1;
+    
+    zf = (src_byte == mem_byte);
+    sf = (src_byte < mem_byte);
+    
+    nib6 = nib6 - 1:2;
+    vf = (nib6 != 0:2);
+    dnib1 = dnib1 + 1:4;
+    
+    if (vf && !zf) goto <loop_start>;
+}
+
+# CPSD p 78
+# CPSD @r1,@r2,r,cc
+:CPSD @dnib5,@dnib1,nib6,cc_jp is op8=0xBB & dnib1 & nib0=0xA; nib7=0 & nib6 & dnib5 & eval_jp & cc_jp {}
+# CPSDB @r1,@r2,r,cc
+:CPSDB @dnib5,@dnib1,nib6,cc_jp is op8=0xBA & dnib1 & nib0=0xA; nib7=0 & nib6 & dnib5 & eval_jp & cc_jp {}
+
+# CPSDR p 79
+# CPSDR @r1,@r2,r,cc
+:CPSDR @dnib5,@dnib1,nib6,cc_jp is op8=0xBB & dnib1 & nib0=0xE; nib7=0 & nib6 & dnib5 & eval_jp & cc_jp {}
+# CPSDRB @r1,@r2,r,cc
+:CPSDRB @dnib5,@dnib1,nib6,cc_jp is op8=0xBA & dnib1 & nib0=0xE; nib7=0 & nib6 & dnib5 & eval_jp & cc_jp {}
+
+# CPSI p 81
+# CPSI @r1,@r2,r,cc
+:CPSI @dnib5,@dnib1,nib6,cc_jp is op8=0xBB & dnib1 & nib0=0x2; nib7=0 & nib6 & dnib5 & eval_jp & cc_jp {}
+# CPSIB @r1,@r2,r,cc
+:CPSIB @dnib5,@dnib1,nib6,cc_jp is op8=0xBA & dnib1 & nib0=0x2; nib7=0 & nib6 & dnib5 & eval_jp & cc_jp {}
+
+# CPSIR p 83
+# CPSIR @r1,@r2,r,cc
+:CPSIR @dnib5,@dnib1,nib6,cc_jp is op8=0xBB & dnib1 & nib0=0x6; nib7=0 & nib6 & dnib5 & eval_jp & cc_jp {}
+# CPSIRB @r1,@r2,r,cc
+:CPSIRB @dnib5,@dnib1,nib6,cc_jp is op8=0xBA & dnib1 & nib0=0x6; nib7=0 & nib6 & dnib5 & eval_jp & cc_jp {}
+
+# p 85
+# DAB r1
+:DAB bnib1 is op8=0xB0 & bnib1 & nib0=0 
+{
+    local val = bnib1;
+    local low_nib:1 = val & 0x0F;
+    local high_nib:1 = val >> 4;
+
+	# Compute addition-specific correction rules as pure 0/1 boolean variables
+    local add_low:1  = (low_nib > 9) || hf;
+    local add_high:1 = (high_nib > 9) || cf || ((high_nib == 9) && (low_nib > 9));
+
+    # Combine addition rules (df==0) and subtraction rules (df==1) using bitwise logic
+    local adj_low:1  = ((df == 0) && add_low)  || ((df != 0) && hf);
+    local adj_high:1 = ((df == 0) && add_high) || ((df != 0) && cf);
+
+    # Calculate total offset adjustment value and perform dynamic execution
+    local correction:1 = (adj_low * 0x06) + (adj_high * 0x60);
+    
+    # Select final result base based on df flag state
+    local res:1 = 0;
+    if (df == 0) goto <do_add>;
+    res = val - correction;
+    goto <do_write>;
+    <do_add>
+    res = val + correction;
+    
+    <do_write>
+    # Write byte back safely into the 16-bit register context
+    bnib1 = res;
+    # Fast flag updates
+    cf = adj_high | cf;
+    zf = (res == 0:1);
+    sf = (res >> 7);
+}
+
+# DEC p87
+# DEC r1,n
+:DEC nib1,value0 is op8=0xAB & nib1 & value0 
+{
+	local dec_val = 1 + value0;
+    nib1 = nib1 - dec_val;
+}
+
+# DECB r1,n
+:DECB bnib1,value0 is op8=0xAA & bnib1 & value0 
+{
+	local dec_val:1 = 1 + value0;
+    bnib1 = bnib1 - dec_val;
+}
+
+# --- indirect reg ---
+# DEC @r1
+:DEC @dnib1,value0 is op8=0x2B & dnib1 & value0 
+{
+    local addr:4 = dnib1;
+    local mem_val:2 = *[ram]:2 addr;
+	local dec_val:2 = 1 + value0;
+	local res:2 = mem_val-dec_val;
+    *[ram]addr = res;
+}
+
+# DECB @r1
+:DECB @dnib1,value0 is op8=0x2A & dnib1 & value0 
+{
+    local addr:4 = dnib1;
+    local mem_val:1 = *[ram]addr;
+	local dec_val:1 = 1 + value0:1;
+	local res:1 = mem_val-dec_val;
+    *[ram]addr = res;
+}
+
+# --- direct address ---
+# DEC Addr32
+:DEC Addr32,value0 is op8=0x6B & nib1=0 & value0; Addr32 
+{
+    local mem_val:2 = *[ram]Addr32;
+	local dec_val:2 = 1 + value0:2;
+	*[ram]Addr32 = mem_val-dec_val;
+}
+
+# DECB Addr32
+:DECB Addr32,value0 is op8=0x6A & nib1=0 & value0; Addr32 
+{
+    local mem_val:1 = *[ram]Addr32;
+	local dec_val:1 = 1 + value0:1;
+	*[ram]Addr32 = mem_val-dec_val;
+}
+
+# --- indexed address ---
+# DEC Addr32(rs)
+:DEC Addr32(nib1),value0 is op8=0x6B & nib1 & value0; Addr32 
+{
+    local addr:4 = Addr32 + zext(nib1);		#FIXME Use that for other instructions
+    local mem_val:2 = *[ram]addr;	        #FIXME Use that for other instructions
+	local dec_val:2 = 1 + value0:2;
+    *[ram]addr = mem_val-dec_val;			#FIXME Use that for other instructions
+}
+
+# DECB Addr32(rs)
+:DECB Addr32(nib1),value0 is op8=0x6A & nib1 & value0; Addr32 
+{
+    local addr:4 = Addr32 + zext(nib1);
+    local mem_val:1 = *[ram]addr;
+	local dec_val:1 = 1 + value0:1;
+    *[ram]addr = mem_val-dec_val;
+}
+
+# FIXME doesn't display flags properly
+# DI p 88
+# DI: Disable Interrupts
+#:DI int_list is op14=0x1F00 & int_list & int_vi & int_nvi 
+:DI int_list is op8=0x7C & int_list & int_vi & int_nvi 
+{
+    vie  = vie  & ~int_vi;
+    nvie = nvie & ~int_nvi;
+}
+
+# DIV p 89
+# --- registers ---
+# DIV rr1.r2
+:DIV dnib0,nib1 is op8=0x9B & nib1 & dnib0 
+{
+}
+
+# DIVL rq1,rr2
+:DIVL qnib0,dnib1 is op8=0x9A & dnib1 & qnib0 
+{
+}
+
+# --- immediate ---
+# DIV rr1,#data
+:DIV dnib0,#imm16 is op8=0x1B & nib1=0 & dnib0; imm16 
+{
+}
+
+# DIVL rq1,#data
+:DIVL qnib0,#imm32 is op8=0x1A & nib1=0 & qnib0; imm32 
+{
+}
+
+# --- indirect reg ---
+# DIV rr1,@r2
+:DIV dnib0,@nib1 is op8=0x1B & nib1 & dnib0 
+{
+}
+
+# DIVL rq1,@r2
+:DIVL qnib0,@nib1 is op8=0x1A & nib1 & qnib0 
+{
+}
+
+# --- direct address ---
+# DIV rr1,address
+:DIV dnib0,Addr32 is op8=0x5B & nib1=0 & dnib0; Addr32 
+{
+}
+
+# DIVL rq1,address
+:DIVL qnib0,Addr32 is op8=0x5A & nib1=0 & qnib0; Addr32 
+{
+}
+
+# --- indexed address ---
+# DIV rr1,addr(r2)
+:DIV dnib0,Addr32(nib1) is op8=0x5B & nib1 & dnib0; Addr32 
+{
+}
+
+# DIVL rq1,addr(r2)
+:DIVL qnib0,Addr32(nib1) is op8=0x5A & nib1 & qnib0; Addr32 
+{
+}
+
+# DJNZ p 92
+:DJNZ nib2,rel7 is op4=0xF & nib2 & W=1 & rel7 
+{
+	nib2 = nib2-1;
+	if (nib2 != 0) goto rel7;
+}
+
+:DBJNZ bnib2,rel7 is op4=0xF & bnib2 & W=0 & rel7 
+{
+	bnib2 = bnib2-1;
+	if (bnib2 != 0) goto rel7;
+}
+
+# FIXME doesn't display flags properly
+# EI p 93
+# EI: Enable Interrupts
+:EI int_list is op14=0x1F01 & int_list & int_vi & int_nvi 
+{
+	vie  = vie  | int_vi;
+    nvie = nvie | int_nvi;
+}
+
+# EX p 94
+# --- registers  ---
+# EX r1,r2
+:EX nib0,nib1 is op8=0xAD & nib1 & nib0 
+{
+	local tmp = nib1;
+    nib1 = nib0;
+	nib0 = tmp;
+}
+
+# EXB r1,r2
+:EXB bnib0,bnib1 is op8=0xAC & bnib1 & bnib0 
+{
+    local tmp = bnib1;
+    bnib1 = bnib0;
+    bnib0 = tmp;
+}
+
+# --- indirect reg ---
+# EX r1,@r2
+:EX nib0,@dnib1 is op8=0x2D & dnib1 & nib0 
+{
+    local addr:4 = dnib1;
+    local mem_val:2 = *[ram]addr;
+	*[ram]addr = nib0;
+    nib0 = mem_val;
+}
+
+# EXB rx1,@r2
+:EXB bnib0,@dnib1 is op8=0x2C & dnib1 & bnib0 
+{
+    local addr:4 = dnib1;
+    local mem_val:1 = *[ram]addr;
+	*[ram]addr = bnib0;
+    bnib0 = mem_val;
+}
+
+# --- direct address ---
+# EX r1,Addr32
+:EX nib0,Addr32 is op8=0x6D & nib1=0 & nib0; Addr32 
+{
+    local mem_val:2 = *[ram]Addr32;
+	*[ram]Addr32 = nib0;
+    nib0 = mem_val;
+}
+
+# EXB rx1,Addr32
+:EXB bnib0,Addr32 is op8=0x6C & nib1=0 & bnib0; Addr32 
+{
+    local mem_val:1 = *[ram]Addr32;
+	*[ram]Addr32 = bnib0;
+    bnib0 = mem_val;
+}
+
+# --- indexed address ---
+# EX r1,Addr32(rs)
+:EX nib0,Addr32(nib1) is op8=0x6D & nib1 & nib0; Addr32 
+{
+    local addr:4 = Addr32 + zext(nib1);		#FIXME Use that for other instructions
+    local mem_val:2 = *[ram]addr;	        #FIXME Use that for other instructions
+    *[ram]addr = nib0;
+	nib0 = mem_val;
+}
+
+# EXB r1,Addr32(rs)
+:EXB bnib0,Addr32(nib1) is op8=0x6C & nib1 & bnib0; Addr32 
+{
+    local addr:4 = Addr32 + zext(nib1);		#FIXME Use that for other instructions
+    local mem_val:1 = *[ram]addr;	        #FIXME Use that for other instructions
+    *[ram]addr = bnib0;
+	bnib0 = mem_val;
+}
+
+# EXTS r1
+:EXTS dnib1 is op8=0xB1 & dnib1 & nib0=0xa 
+{
+    dnib1 = dnib1;
+}
+
+# EXTSB r1
+:EXTSB nib1 is op8=0xB1 & nib1 & nib0=0 
+{
+    nib1 = nib1;
+}
+
+# EXTS r1
+:EXTSL qnib1 is op8=0xB1 & qnib1 & nib0=0x7 
+{
+    qnib1 = qnib1;
+}
+
+# --- Halt CPU (HALT) ---
+# Native Z8000 Opcode: 0x7A00
+:HALT is op16=0x7A00 
+{
+    goto inst_start;
+}
+
+# IN/SIN p 97
+# IN r1,@r2
+:IN nib0,@nib1 is op8=0x3D & nib1 & nib0 
+{
+}
+
+:INB bnib0,@nib1 is op8=0x3C & nib1 & bnib0 
+{
+}
+
+:IN nib1,imm16 is op8=0x3B & nib1 & nib0=0x4; imm16 
+{
+}
+
+:INB bnib1,imm16 is op8=0x3A & bnib1 & nib0=0x4; imm16 
+{
+}
+
+:SIN nib1,imm16 is op8=0x3B & nib1 & nib0=0x5; imm16 
+{
+}
+
+:SINB bnib1,imm16 is op8=0x3A & bnib1 & nib0=0x5; imm16 
+{
+}
+
+# INC p 98
+# INC r1,n
+:INC nib1,value0 is op8=0xA9 & nib1 & value0 
+{
+    local inc_val:2 = 1 + value0;
+    nib1 = nib1 + inc_val;
+}
+
+# INCB r1,n
+:INCB bnib1,value0 is op8=0xA8 & bnib1 & value0 
+{
+    local inc_val:1 = 1 + value0;
+    bnib1 = bnib1 + inc_val;
+}
+
+# --- indirect reg ---
+# INC @r1
+:INC @dnib1,value0 is op8=0x29 & dnib1 & value0 
+{
+    local addr:4 = dnib1;
+    local mem_val:2 = *[ram]addr;
+    local inc_val:2 = 1 + value0;
+    local res:2 = mem_val + inc_val;
+    *[ram]addr = res;
+}
+
+# INCB @r1
+:INCB @dnib1,value0 is op8=0x28 & dnib1 & value0 
+{
+    local addr:4 = dnib1;
+    local mem_val:1 = *[ram]addr;
+    local inc_val:1 = 1 + value0:1;
+    local res:1 = mem_val + inc_val;
+    *[ram]addr = res;
+}
+
+# --- direct address ---
+# INC Addr32
+:INC Addr32,value0 is op8=0x69 & nib1=0 & value0; Addr32 
+{
+    local mem_val:2 = *[ram]Addr32;
+    local inc_val:2 = 1 + value0:2;
+    *[ram]Addr32 = mem_val + inc_val;
+}
+
+# INCB Addr32
+:INCB Addr32,value0 is op8=0x68 & nib1=0 & value0; Addr32 
+{
+    local mem_val:1 = *[ram]Addr32;
+    local inc_val:1 = 1 + value0:1;
+    *[ram]Addr32 = mem_val + inc_val;
+}
+
+# --- indexed address ---
+# INC Addr32(rs)
+:INC Addr32(nib1),value0 is op8=0x69 & nib1 & value0; Addr32 
+{
+    local addr:4 = Addr32 + zext(nib1);
+    local mem_val:2 = *[ram]addr;
+    local inc_val:2 = 1 + value0:2;
+    *[ram]addr = mem_val + inc_val;
+}
+
+# INCB Addr32(rs)
+:INCB Addr32(nib1),value0 is op8=0x68 & nib1 & value0; Addr32 
+{
+    local addr:4 = Addr32 + zext(nib1);
+    local mem_val:1 = *[ram]addr;
+    local inc_val:1 = 1 + value0:1;
+    *[ram]addr = mem_val + inc_val;
+}
+
+# IND/SIND p 99
+:IND @nib5,@nib1,nib6 is op8=0x3B & nib1 & nib0=0; nib7=0 & nib6 & nib5 & nib4=0x8 
+{
+}
+
+:INDB @nib5,@nib1,nib6 is op8=0x3A & nib1 & nib0=0; nib7=0 & nib6 & nib5 & nib4=0x8 
+{
+}
+
+:SIND @nib5,@nib1,nib6 is op8=0x3B & nib1 & nib0=1; nib7=0 & nib6 & nib5 & nib4=0x8 
+{
+}
+
+:SINDB @nib5,@nib1,nib6 is op8=0x3A & nib1 & nib0=1; nib7=0 & nib6 & nib5 & nib4=0x8 
+{
+}
+
+# INDR/SINDR p 100
+:INDR @nib5,@nib1,nib6 is op8=0x3B & nib1 & nib0=0x8; nib7=0 & nib6 & nib5 & nib4=0 
+{
+}
+
+:INDRB @nib5,@nib1,nib6 is op8=0x3A & nib1 & nib0=0x8; nib7=0 & nib6 & nib5 & nib4=0 
+{
+}
+
+:SINDR @nib5,@nib1,nib6 is op8=0x3B & nib1 & nib0=0x9; nib7=0 & nib6 & nib5 & nib4=0 
+{
+}
+
+:SINDRB @nib5,@nib1,nib6 is op8=0x3A & nib1 & nib0=0x9; nib7=0 & nib6 & nib5 & nib4=0 
+{
+}
+
+# INI/SINI p 102
+:INI @nib5,@nib1,nib6 is op8=0x3B & nib1 & nib0=0x8; nib7=0 & nib6 & nib5 & nib4=0x8 
+{
+}
+
+:INIB @nib5,@nib1,nib6 is op8=0x3A & nib1 & nib0=0x8; nib7=0 & nib6 & nib5 & nib4=0x8 
+{
+}
+
+:SINI @nib5,@nib1,nib6 is op8=0x3B & nib1 & nib0=0x9; nib7=0 & nib6 & nib5 & nib4=0x8 
+{
+}
+
+:SINIB @nib5,@nib1,nib6 is op8=0x3A & nib1 & nib0=0x9; nib7=0 & nib6 & nib5 & nib4=0x8 
+{
+}
+
+# INIR/SINIR p 103
+:INIR @nib5,@nib1,nib6 is op8=0x3B & nib1 & nib0=0; nib7=0 & nib6 & nib5 & nib4=0 
+{
+}
+
+:INIRB @nib5,@nib1,nib6 is op8=0x3A & nib1 & nib0=0; nib7=0 & nib6 & nib5 & nib4=0 
+{
+}
+
+:SINIR @nib5,@nib1,nib6 is op8=0x3B & nib1 & nib0=1; nib7=0 & nib6 & nib5 & nib4=0 
+{
+}
+
+:SINIRB @nib5,@nib1,nib6 is op8=0x3A & nib1 & nib0=1; nib7=0 & nib6 & nib5 & nib4=0 
+{
+}
+
+# --- Interrupt Return (IRET) ---
+# Native Z8000 Opcode: 0x7B00
+# Z8001 Segmented Behavior: Pops FCW (2 bytes) then pops the segmented PC (4 bytes) 
+# off the system stack tracker (r15).
+:IRET is op16=0x7B00 
+{
+    local stack_ptr:4;
+    
+    # 1. Pop the 16-bit FCW status word from the stack
+    getLinearAddress(rr14,stack_ptr);
+    FCW = *:2 stack_ptr;
+    rr14 = rr14 + 2; # Adjust stack pointer up
+    
+    # 2. Pop the 32-bit Segmented Program Counter from the stack
+    getLinearAddress(rr14,stack_ptr);
+    local target_pc:4 = *:4 stack_ptr;
+    rr14 = rr14 + 4; # Adjust stack pointer up
+    
+    # 3. Reconstruct and jump directly to the target linear address space
+    local linear_pc:4;
+    getLinearAddress(target_pc,linear_pc);
+    return [linear_pc];
+}
+
+#FIXME Not implemented
+# JP p 106
+:JP cc_jp,@nib1 is op8=0x1E & nib1 & eval_jp & cc_jp 
+{
+}
+
+:JP cc_jp,Addr32 is op8=0x5E & nib1=0 & eval_jp & cc_jp; Addr32 
+{
+}
+
+:JP cc_jp,Addr32(nib1) is op8=0x5E & nib1 & eval_jp & cc_jp; Addr32 
+{
+}
+
+# JR p 107
+# Unconditional Jump Relative
+:JR rel8 is op4=0xE & cc_jr=0x8 & rel8 
+{
+}
+
+# Conditional Jump Relative
+:JR cc_jr,rel8 is op4=0xE & cc_jr & rel8 
+{
+}
+
+# ---------------------------------------------------------
+# Load Register
+# ---------------------------------------------------------
+# --- registers  ---
+# LD r1,r2
+:LD nib0,nib1 is op8=0xA1 & nib1 & nib0 
+{
+    nib0 = nib1;
+}
+
+# LDB r1,r2
+:LDB bnib0,bnib1 is op8=0xA0 & bnib1 & bnib0 
+{
+    bnib0 = bnib1;
+}
+
+# LDL rr1,rr2
+:LDL dnib0,dnib1 is op8=0x94 & dnib1 & dnib0 
+{
+    dnib0 = dnib1;
+}
+
+# --- indirect ---
+# LD r1,@rr2
+:LD nib0,@dnib1 is op8=0x21 & dnib1 & nib0 
+{
+    # Construct target address out of the source 32-bit pointer register
+    local target:4;
+    getLinearAddress(dnib1,target);
+    
+    # Read a 16-bit word from the computed RAM address
+    nib0 = *:2 target;
+}
+
+# LDB r1,@rr2
+:LDB bnib0,@dnib1 is op8=0x20 & dnib1 & bnib0 
+{
+    # Construct target address out of the source 32-bit pointer register
+    local target:4;
+    getLinearAddress(dnib1,target);
+    
+    # Read a 16-bit word from the computed RAM address
+    bnib0 = *:1 target;
+}
+
+# LDL rr1,@rr2
+:LDL dnib0,@dnib1 is op8=0x14 & dnib1 & dnib0 
+{
+    # Construct target address out of the source 32-bit pointer register
+    local target:4;
+    getLinearAddress(dnib1,target);
+    
+    # Read a 16-bit word from the computed RAM address
+    dnib0 = *:2 target;
+}
+
+# --- direct address ---
+# LD r1,Addr32
+:LD nib0,Addr32 is op8=0x61 & nib1=0 & nib0; Addr32 
+{
+    nib0 = *[ram]Addr32;
+}
+
+# LDB rx1,Addr32
+:LDB bnib0,Addr32 is op8=0x60 & nib1=0 & bnib0; Addr32 
+{
+    bnib0 = *[ram]Addr32;
+}
+
+# LDL r1,Addr32
+:LDL dnib0,Addr32 is op8=0x54 & nib1=0 & dnib0; Addr32 
+{
+    dnib0 = *[ram]Addr32;
+}
+
+# --- indexed address ---
+# LD r1,Addr32(rs)
+:LD nib0,Addr32(nib1) is op8=0x61 & nib1 & nib0; Addr32 
+{
+    local addr:4 = Addr32 + zext(nib1);
+    nib0 = *[ram]addr;
+}
+
+# LDB rx1,Addr32(rs)
+:LDB bnib0,Addr32(nib1) is op8=0x60 & nib1 & bnib0; Addr32 
+{
+    local addr:4 = Addr32 + zext(nib1);
+    bnib0 = *[ram]addr;
+}
+
+# LDL rr1,Addr32(rs)
+:LDL dnib0,Addr32(nib1) is op8=0x54 & nib1 & dnib0; Addr32 
+{
+    local addr:4 = Addr32 + zext(nib1);
+    dnib0 = *[ram]addr;
+}
+
+# --- base address ---
+# LD r1,r2(#imm16)
+:LD nib0,nib1(#imm16) is op8=0x31 & nib1 & nib0; imm16 
+{
+	local tmpOffset:4 = zext(nib1 + imm16);
+    nib0 = *[ram]:2 tmpOffset;
+}
+
+# LDB rx1,r2(#imm16)
+:LDB bnib0,nib1(#imm16) is op8=0x30 & nib1 & bnib0; imm16 
+{
+	local tmpOffset:4 = zext(nib1 + imm16);
+    bnib0 = *[ram]:1 tmpOffset;
+}
+
+# LDL rr1,r2(#imm16)
+:LDL dnib0,nib1(#imm16) is op8=0x35 & nib1 & dnib0; imm16 
+{
+	local tmpOffset:4 = zext(nib1 + imm16);
+    dnib0 = *[ram]:4 tmpOffset;
+}
+
+# --- base index ---
+# LD r1,r2(rx)
+:LD nib0,nib1(nib6) is op8=0x71 & nib1 & nib0; nib7=0 & nib6 & byte0=0 
+{
+}
+
+# LDB rx1,r2(rx)
+:LDB bnib0,nib1(nib6) is op8=0x70 & nib1 & bnib0; nib7=0 & nib6 & byte0=0 
+{
+}
+
+# LDL rr1,r2(rx)
+:LDL dnib0,nib1(nib6) is op8=0x75 & nib1 & dnib0; nib7=0 & nib6 & byte0=0 
+{
+}
+
+# ---------------------------------------------------------
+# Load Memory
+# ---------------------------------------------------------
+# --- indirect ---
+# LD @r1,r2
+:LD @nib1,nib0 is op8=0x2F & nib1 & nib0 
+{
+#    local target:4;
+#    getLinearAddress(nib1,target);
+    
+    # Write the 16-bit register value out to RAM
+#    *:2 target = nib0;
+}
+
+# LDB @r1,rx2
+:LDB @nib1,bnib0 is op8=0x2E & nib1 & bnib0 
+{
+#    local target:4;
+#    getLinearAddress(nib1,target);
+    
+    # Write the 8-bit register value out to RAM
+#    *:1 target = bnib0;
+}
+
+# LDL @r1,rr2
+:LDL @nib1,dnib0 is op8=0x1D & nib1 & dnib0 
+{
+#    local target:4;
+#    getLinearAddress(dnib1,target);
+    
+    # Write the 32-bit register value out to RAM
+#    *:4 target = dnib0;
+}
+
+# --- direct address ---
+# LD Addr32,r1
+:LD Addr32,nib0 is op8=0x6F & nib1=0 & nib0; Addr32 
+{
+    *[ram]Addr32 = nib0;
+}
+
+# LDB Addr32,rx1
+:LDB Addr32,bnib0 is op8=0x6E & nib1=0 & bnib0; Addr32 
+{
+    *[ram]Addr32 = bnib0;
+}
+
+# LDL Addr32,rr1
+:LDL Addr32,dnib0 is op8=0x5D & nib1=0 & dnib0; Addr32 
+{
+    *[ram]Addr32 = dnib0;
+}
+
+# --- indexed address ---
+# LD Addr32(r1),r2
+:LD Addr32(nib1),nib0 is op8=0x6F & nib1 & nib0; Addr32 
+{
+    local addr:4 = Addr32 + zext(nib1);
+    *[ram]addr = nib0;
+}
+
+# LDB Addr32(r1),rx2
+:LDB Addr32(nib1),bnib0 is op8=0x6E & nib1 & bnib0; Addr32 
+{
+    local addr:4 = Addr32 + zext(nib1);
+    *[ram]addr = bnib0;
+}
+
+# LDL Addr32(r1),rr2
+:LDL Addr32(nib1),dnib0 is op8=0x5D & nib1 & dnib0; Addr32 
+{
+    local addr:4 = Addr32 + zext(nib1);
+    *[ram]addr = dnib0;
+}
+
+# --- base address ---
+# LD r1(#imm16),r2
+:LD nib1(#imm16),nib0 is op8=0x33 & nib1 & nib0; imm16 
+{
+	local tmpOffset:4 = zext(nib1 + imm16);
+    *[ram]:2 tmpOffset = nib0;
+}
+
+# LDB r1(#imm16),rx2
+:LDB nib1(#imm16),bnib0 is op8=0x32 & nib1 & bnib0; imm16 
+{
+	local tmpOffset:4 = zext(nib1 + imm16);
+    bnib0 = *[ram]:1 tmpOffset;
+}
+
+# LDL r1(#imm16),rr2
+:LDL nib1(#imm16),dnib0 is op8=0x37 & nib1 & dnib0; imm16 
+{
+	local tmpOffset:4 = zext(nib1 + imm16);
+    *[ram]:4 tmpOffset = dnib0;
+}
+
+# --- base index ---
+# LD r1(rx),r2
+:LD nib1(nib6),nib0 is op8=0x73 & nib1 & nib0; nib7=0 & nib6 & byte0=0 
+{
+}
+
+# LDB r1(rx),rx2
+:LDB nib1(nib6),bnib0 is op8=0x72 & nib1 & bnib0; nib7=0 & nib6 & byte0=0 
+{
+}
+
+# LDL r1(rx),rr2
+:LDL nib1(nib6),dnib0 is op8=0x77 & nib1 & dnib0; nib7=0 & nib6 & byte0=0 
+{
+}
+
+# ---------------------------------------------------------
+# Load Immediate
+# ---------------------------------------------------------
+# --- registers  ---
+# LD r1,#0x1234
+:LD nib0,#imm16 is op8=0x21 & nib1=0 & nib0; imm16 
+{
+    nib0 = imm16;
+}
+
+# LDB rx1,#0x12
+:LDB bnib2,#byte0 is op4=0xC & bnib2 & byte0 
+{
+    bnib2 = byte0;
+}
+
+# LDL rr1,#0x1234
+:LDL dnib0,#imm32 is op8=0x14 & nib1=0 & dnib0; imm32 
+{
+    dnib0 = imm32;
+}
+
+# --- indirect ---
+# LD @r1,#0x1234
+:LD @nib1,#imm16 is op8=0x0D & nib1 & nib0=0x5; imm16 
+{
+}
+
+# LDB @r1,#0x1234
+:LDB @nib1,#imm16 is op8=0x0C & nib1 & nib0=0x5; imm16 
+{
+}
+
+# --- direct address ---
+# LD Addr32,#0x1234
+:LD Addr32,#imm16 is op16=0x4D05; Addr32; imm16 
+{
+    *[ram]:2 Addr32 = imm16;
+}
+
+# LDB Addr32,#0x1234
+:LDB Addr32,#imm16 is op16=0x4C05; Addr32; imm16 
+{
+    *[ram]:1 Addr32 = imm16;
+}
+
+# --- indexed address ---
+# LD Addr32(r1),#0x1234
+:LD Addr32(nib1),#imm16 is op8=0x4D & nib1 & nib0=0x5; Addr32; imm16 
+{
+    local addr:4 = Addr32 + zext(nib1);
+    *[ram]:2 addr = imm16;
+}
+
+# LDB Addr32(r1),#0x1234
+:LDB Addr32(nib1),#imm16 is op8=0x4C & nib1 & nib0=0x5; Addr32; imm16 
+{
+    local addr:4 = Addr32 + zext(nib1);
+    *[ram]:1 addr = imm16;
+}
+
+# LDA
+# FIXME DECODE DOESN'T WORK; 
+#   CODE ASSEMBLED WITH GNU AS DOESN'T HAVE THE SEGMENT BIT SET
+# LDA p 113
+# LDA rr1, Address
+# --- direct address ---
+# LDA rr1, Addr32
+:LDA dnib0, Addr32 is op8=0x76 & nib1=0 & dnib0; Addr32 
+{
+    dnib0 = Addr32;
+}
+
+# --- indexed address ---
+# LDA rr1, Addr32(rs)
+:LDA dnib0, Addr32(nib1) is op8=0x76 & nib1 & dnib0; Addr32 
+{
+    local addr:4 = Addr32 + zext(nib1);
+    dnib0 = addr;
+}
+
+# --- base address ---
+# LDA rr1, r2(#imm16)
+:LDA dnib0, nib1(#imm16) is op8=0x34 & nib1 & dnib0; imm16 
+{
+	local tmp:4 = zext(nib1 + imm16);
+    dnib0 = *[ram]tmp;
+}
+
+# --- base index ---
+# LDA rr1, r2(rx)
+:LDA dnib0, nib1(nib6) is op8=0x74 & nib1 & dnib0; nib7=0 & nib6 & byte0=0 
+{
+	local tmp:4 = zext(nib1 + nib6);
+	dnib0 = *[ram]tmp;
+}
+
+# LDAR p 115
+# LDAR rr1,address
+:LDAR dnib0,imm16 is op8=0x34 & nib1=0 & dnib0; imm16 
+{
+	local tmp_data = inst_next + imm16;
+    dnib0 = tmp_data;
+}
+
+#attach names [ ctlr ] 
+#[
+#	_ _ "FCW" "REFRESH" "PSAPSEG" "PSAPOFF" "NSPSEG" "NSPOFF"
+#];
+
+# LDCTL p 116
+:LDCTL "FCW",nib1 	   is op8=0x7D & nib1 & dirr=1 & ctlr=0x2 { FCW = nib1 & 0xF8FC; }
+:LDCTL "REFRESH",nib1 is op8=0x7D & nib1 & dirr=1 & ctlr=0x3 { REFRESH = nib1 & 0xFFFE; }
+:LDCTL "PSAPSEG",nib1 is op8=0x7D & nib1 & dirr=1 & ctlr=0x4 { PSAPSEG = nib1 & 0x7F00; }
+:LDCTL "PSAPOFF",nib1 is op8=0x7D & nib1 & dirr=1 & ctlr=0x5 { PSAPOFF = nib1 & 0xFF00; }
+:LDCTL "NSPSEG",nib1  is op8=0x7D & nib1 & dirr=1 & ctlr=0x6 { NSPSEG = nib1; }
+:LDCTL "NSPOFF",nib1  is op8=0x7D & nib1 & dirr=1 & ctlr=0x7 { NSPOFF = nib1; }
+
+:LDCTL nib1,"FCW"     is op8=0x7D & nib1 & dirr=0 & ctlr=0x2 { nib1 = FCW; }
+:LDCTL nib1,"REFRESH" is op8=0x7D & nib1 & dirr=0 & ctlr=0x3 { nib1 = REFRESH & 0xFFFE; }
+:LDCTL nib1,"PSAPSEG" is op8=0x7D & nib1 & dirr=0 & ctlr=0x4 { nib1 = PSAPSEG; }
+:LDCTL nib1,"PSAPOFF" is op8=0x7D & nib1 & dirr=0 & ctlr=0x5 { nib1 = PSAPOFF; }
+:LDCTL nib1,"NSPSEG"  is op8=0x7D & nib1 & dirr=0 & ctlr=0x6 { nib1 = NSPSEG; }
+:LDCTL nib1,"NSPOFF"  is op8=0x7D & nib1 & dirr=0 & ctlr=0x7 { nib1 = NSPOFF; }
+
+# LDCTLB p 121
+:LDCTLB "FLAGS",bnib1 is op8=0x8C & bnib1 & nib0=0x9
+{ 
+    # Create a local temporary variable sized to match FCW (2 bytes)
+    local tmp:2 = zext(bnib1) & 0x00FC; 
+    FCW = tmp; 
+}
+
+:LDCTLB bnib1,"FLAGS" is op8=0x8C & bnib1 & nib0=0x1
+{ 
+    # Truncate the 16-bit register down to a 1-byte varnode and mask it
+    regDestByte = FCW:1 & 0xFC; 
+}
+
+# LDD p 123
+# LDD @rr1,@rr2,r
+:LDD @dnib1,@dnib5,nib6  is op8=0xBB & dnib1 & nib0=0x9; nib7=0 & nib6 & dnib5 & nib4=0x8 {}
+:LDDB @dnib1,@dnib5,nib6 is op8=0xBA & dnib1 & nib0=0x9; nib7=0 & nib6 & dnib5 & nib4=0x8 {}
+
+# LDDR p 124
+# LDDR @rr1,@rr2,r
+:LDDR @dnib1,@dnib5,nib6  is op8=0xBB & dnib1 & nib0=0x9; nib7=0 & nib6 & dnib5 & nib4=0 {}
+:LDDRB @dnib1,@dnib5,nib6 is op8=0xBA & dnib1 & nib0=0x9; nib7=0 & nib6 & dnib5 & nib4=0 {}
+
+# LDI p 126
+# LDI @rr1,@rr2,r
+:LDI @dnib1,@dnib5,nib6  is op8=0xBB & dnib1 & nib0=0x1; nib7=0 & nib6 & dnib5 & nib4=0x8 {}
+:LDIB @dnib1,@dnib5,nib6 is op8=0xBA & dnib1 & nib0=0x1; nib7=0 & nib6 & dnib5 & nib4=0x8 {}
+
+# LDIR p 127
+# LDIR @rr1,@rr2,r
+:LDIR @dnib1,@dnib5,nib6  is op8=0xBB & dnib1 & nib0=0x1; nib7=0 & nib6 & dnib5 & nib4=0 {}
+:LDIRB @dnib1,@dnib5,nib6 is op8=0xBA & dnib1 & nib0=0x1; nib7=0 & nib6 & dnib5 & nib4=0 {}
+
+# LDK p 129
+# LDK r1,1data
+:LDK nib1,#value0 is op8=0xBD & nib1 & value0 { nib1 = value0; }
+
+# LDM p 130
+# FIXME ASSEMBLER #7 DISASSEMBLER #6
+# --- indirect ---
+# LDM r1,@r2,#n
+:LDM nib6,dnib1,#value0 is op8=0x1C & dnib1 & nib0=0x1; nib7=0 & nib6 &nib5=0 & value0 { }
+
+# --- direct address ---
+# LDM r1,address,#n
+:LDM nib6,Addr32,#value0 is op16=0x5C01; nib7=0 & nib6 & nib5=0 & value0; Addr32 { }
+
+# --- indexed address ---
+# LDM r1,Addr32(r1),#n
+:LDM nib6,Addr32(nib1),#value0 is op8=0x5C & nib1 & nib0=0x1; nib7=0 & nib6 & nib5=0 & value0; Addr32 {}
+
+# --- indirect ---
+# LDM @r1,r2,#n
+:LDM dnib1,nib6,#value0 is op8=0x1C & dnib1 & nib0=0x9; nib7=0 & nib6 &nib5=0 & value0 { }
+
+# --- direct address ---
+# LDM Addr32,r1,#n
+:LDM Addr32,nib6,#value0 is op16=0x5C09; nib7=0 & nib6 & nib5=0 & value0; Addr32 { }
+
+# --- indexed address ---
+# LDM Addr32(r1),r2,#n
+:LDM Addr32(nib1),nib6,#value0 is op8=0x5C & nib1 & nib0=0x9; nib7=0 & nib6 & nib5=0 & value0; Addr32 {}
+
+# LDPS p 133
+# --- indirect ---
+# LDPS @rr1
+:LDPS dnib1 is op8=0x39 & dnib1 & nib0=0 { }
+
+# --- direct address ---
+# LDPS Addr32
+:LDPS Addr32 is op16=0x7900; Addr32 { }
+
+# --- indexed address ---
+# LDPS Addr32(r1)
+:LDPS Addr32(nib1) is op8=0x79 & nib1 & nib0=0; Addr32 {}
+
+# LDR p 134
+:LDR nib0, disp16   is op8=0x31 & nib1=0 & nib0; disp16 {}
+:LDRB bnib0, disp16 is op8=0x30 & nib1=0 & bnib0; disp16 {}
+:LDRL dnib0, disp16 is op8=0x35 & nib1=0 & dnib0; disp16 {}
+:LDR disp16,nib0    is op8=0x33 & nib1=0 & nib0; disp16 {}
+:LDRB disp16,bnib0  is op8=0x32 & nib1=0 & bnib0; disp16 {}
+:LDRL disp16,dnib0  is op8=0x37 & nib1=0 & dnib0; disp16 {}
+
+# MBIT p 136
+:MBIT is op16=0x7B0A {}
+# MREQ p 137
+:MREQ nib1 is op8=0x7B & nib1 & nib0=0xD {}
+# MRES p 139
+:MRES is op16=0x7B09 {}
+# MSET p 140
+:MSET is op16=0x7B08 {}
+
+# ---------------------------------------------------------
+# MULT p 141
+# --- registers  ---
+# MULT rr1,r2
+:MULT dnib0,nib1 is op8=0x99 & nib1 & dnib0 {}
+
+# MULTL rq1,rr2
+:MULTL qnib0,dnib1 is op8=0x98 & dnib1 & qnib0 {}
+
+# --- immediate ---
+# MULT rr1,#data
+:MULT dnib0,#imm16 is op8=0x19 & nib1=0 & dnib0; imm16 {}
+
+# MULTL rq1,#data
+:MULTL qnib0,#imm32 is op8=0x18 & nib1=0 & qnib0; imm32 {}
+
+# --- indirect ---
+# MULT rr1,@r2
+:MULT dnib0,@dnib1 is op8=0x19 & dnib1 & dnib0 {}
+
+# MULTL rq1,@r2
+:MULTL qnib0,@dnib1 is op8=0x18 & dnib1 & qnib0 {}
+
+# --- direct address ---
+# MULT rr1,address
+:MULT dnib0,Addr32 is op8=0x59 & nib1=0 & dnib0; Addr32 {}
+
+# MULTL rq1,address
+:MULTL qnib0,Addr32 is op8=0x58 & nib1=0 & qnib0; Addr32 {}
+
+# --- indexed address ---
+# MULT rr1,addr(r2)
+:MULT dnib0,Addr32(nib1) is op8=0x59 & nib1 & dnib0; Addr32 {}
+
+# MULTL rq1,addr(r2)
+:MULTL qnib0,Addr32(nib1) is op8=0x58 & nib1 & qnib0; Addr32 {}
+
+# ---------------------------------------------------------
+# NEG p 144
+# NEG r1
+:NEG nib1 is op8=0x8D & nib1 & nib0=2 
+{
+    nib1 = -nib1;
+}
+
+# NEGB r1
+:NEGB bnib1 is op8=0x8C & bnib1 & nib0=2 
+{
+    bnib1 = -bnib1;
+}
+
+# --- indirect reg ---
+# NEG @r1
+:NEG @dnib1 is op8=0x0D & dnib1 & nib0=2 
+{
+    local addr:4 = dnib1;
+    local mem_val:2 = *[ram]:2 addr;
+	local res:2 = -mem_val;
+    dnib1 = zext(res);
+}
+
+# NEGB @r1
+:NEGB @dnib1 is op8=0x0C & dnib1 & nib0=2 
+{
+    local addr:4 = dnib1;
+    local mem_val:1 = *[ram]:1 addr;
+	local res:1 = -mem_val;
+    dnib1 = zext(res);
+}
+
+# --- direct address ---
+# NEG Addr32
+:NEG Addr32 is op8=0x4D & nib1=0 & nib0=2; Addr32 
+{
+    local mem_val:2 = *[ram]Addr32;
+	*[ram]Addr32 = -mem_val;
+}
+
+# NEGB Addr32
+:NEGB Addr32 is op8=0x4C & nib1=0 & nib0=2; Addr32 
+{
+    local mem_val:1 = *[ram]Addr32;
+	*[ram]Addr32 = -mem_val;
+}
+
+# --- indexed address ---
+# NEG Addr32(rs)
+:NEG Addr32(nib1) is op8=0x4D & nib1 & nib0=2; Addr32 
+{
+    local addr:4 = zext(nib1);
+    local mem_val:2 = *[ram]:2 (addr + zext(nib1));
+
+    *[ram]:2 (addr + zext(nib1)) = -mem_val;
+}
+
+# NEGB Addr32(rs)
+:NEGB Addr32(nib1) is op8=0x4C & nib1 & nib0=2; Addr32 
+{
+    local addr:4 = zext(nib1);
+    local mem_val:1 = *[ram]:1 (addr + zext(nib1));
+
+    *[ram]:1 (addr + zext(nib1)) = -mem_val;
+}
+
+# --- No Operation (NOP) ---
+# Native Z8000 Opcode: 0x8D07 (ld r0,r0 acts as the official NOP)
+:NOP is op16=0x8D07 
+{
+	goto inst_next;
+}
+
+# p 146
+# --- registers  ---
+# OR r1,r2
+:OR nib0,nib1 is op8=0x85 & nib1 & nib0 
+{
+    nib0 = nib0 | nib1;
+}
+
+# ORB r1,r2
+:ORB bnib0,bnib1 is op8=0x84 & bnib1 & bnib0 
+{
+    bnib0 = bnib0 | bnib1;
+}
+
+# --- immediate ---
+# OR r1,#val16
+:OR nib0,#imm16 is op8=0x05 & nib1=0 & nib0; imm16 
+{
+    local imm_val:2 = imm16;
+    nib0 = nib0 | imm_val;
+}
+
+# ORB r1,#val16
+:ORB bnib0,#imm16 is op8=0x04 & nib1=0 & bnib0; imm16 
+{
+    local imm_val:1 = imm16;
+    bnib0 = bnib0 | imm_val;
+}
+
+# --- indirect reg ---
+# OR r1,@r2
+:OR nib0,@dnib1 is op8=0x05 & dnib1 & nib0 
+{
+    local addr:4 = dnib1;
+    local mem_val:2 = *[ram]:2 addr;
+    nib0 = nib0 | mem_val;
+}
+
+# ORB r1,@r2
+:ORB bnib0,@dnib1 is op8=0x04 & dnib1 & bnib0 
+{
+    local addr:4 = dnib1;
+    local mem_val:1 = *[ram]addr;
+    bnib0 = bnib0 | mem_val;
+}
+
+# --- direct address ---
+# OR r1,Addr32
+:OR nib0,Addr32 is op8=0x45 & nib1=0 & nib0; Addr32 
+{
+    nib0 = nib0 | *[ram]Addr32;
+}
+
+# ORB r1,Addr32
+:ORB bnib0,Addr32 is op8=0x44 & nib1=0 & bnib0; Addr32 
+{
+    bnib0 = bnib0 | *[ram]Addr32;
+}
+
+# --- indexed address ---
+# OR r1,Addr32(rs)
+:OR nib0,Addr32(nib1) is op8=0x45 & nib1 & nib0; Addr32 
+{
+    local addr:4 = zext(nib1);
+    local mem_val:2 = *[ram]:2 (addr + zext(nib1));
+
+    nib0 = nib0 | mem_val;
+}
+
+# ORB r1,Addr32(rs)
+:ORB bnib0,Addr32(nib1) is op8=0x44 & nib1 & bnib0; Addr32 
+{
+    local addr:4 = zext(nib1);
+    local mem_val:1 = *[ram]:1 (addr + zext(nib1));
+
+    bnib0 = bnib0 | mem_val;
+}
+
+# OTDR/SOTDR p 148
+# OTDR @r1,@rr2,r
+:OTDR @nib5,@dnib1,nib6 is op8=0x3B & dnib1 & nib0=0xA; nib7=0 & nib6 & nib5 & nib4=0 {}
+:OTDRB @nib5,@dnib1,nib6 is op8=0x3A & dnib1 & nib0=0xA; nib7=0 & nib6 & nib5 & nib4=0 {}
+:SOTDR @nib5,@dnib1,nib6 is op8=0x3B & dnib1 & nib0=0xB; nib7=0 & nib6 & nib5 & nib4=0 {}
+:SOTDRB @nib5,@dnib1,nib6 is op8=0x3A & dnib1 & nib0=0xB; nib7=0 & nib6 & nib5 & nib4=0 {}
+
+# OTIR/SOTIR p 150
+# OTIR @r1,@rr2,r
+:OTIR @nib5,@dnib1,nib6 is op8=0x3B & dnib1 & nib0=0x2; nib7=0 & nib6 & nib5 & nib4=0 {}
+:OTIRB @nib5,@dnib1,nib6 is op8=0x3A & dnib1 & nib0=0x2; nib7=0 & nib6 & nib5 & nib4=0 {}
+:SOTIR @nib5,@dnib1,nib6 is op8=0x3B & dnib1 & nib0=0x3; nib7=0 & nib6 & nib5 & nib4=0 {}
+:SOTIRB @nib5,@dnib1,nib6 is op8=0x3A & dnib1 & nib0=0x3; nib7=0 & nib6 & nib5 & nib4=0 {}
+
+# OUT/SOUT p 152
+# --- indirect ---
+# OUT @r1,r2
+:OUT @nib1,nib0 is op8=0x3F & nib1 & nib0 {}
+:OUTB @nib1,nib0, is op8=0x3E & nib1 & nib0 {}
+
+# --- direct address ---
+:OUT imm16,nib1 is op8=0x3B & nib1 & nib0=0x6; imm16 {}
+:OUTB imm16,bnib1 is op8=0x3A & bnib1 & nib0=0x6; imm16 {}
+:SOUT imm16,nib1 is op8=0x3B & nib1 & nib0=0x7; imm16 {}
+:SOUTB imm16,bnib1 is op8=0x3A & bnib1 & nib0=0x7; imm16 {}
+
+# OUTD/SOUTD p 153
+# OUTD @r1,@rr2,r
+:OUTD @nib5,@dnib1,nib6 is op8=0x3B & dnib1 & nib0=0xA; nib7=0 & nib6 & nib5 & nib4=0x8 {}
+:OUTDB @nib5,@dnib1,nib6 is op8=0x3A & dnib1 & nib0=0xA; nib7=0 & nib6 & nib5 & nib4=0x8 {}
+:SOUTD @nib5,@dnib1,nib6 is op8=0x3B & dnib1 & nib0=0xB; nib7=0 & nib6 & nib5 & nib4=0x8 {}
+:SOUTDB @nib5,@dnib1,nib6 is op8=0x3A & dnib1 & nib0=0xB; nib7=0 & nib6 & nib5 & nib4=0x8 {}
+
+# OUTI @r1,@rr2,r
+:OUTI @nib5,@dnib1,nib6 is op8=0x3B & dnib1 & nib0=0x2; nib7=0 & nib6 & nib5 & nib4=0x8 {}
+:OUTIB @nib5,@dnib1,nib6 is op8=0x3A & dnib1 & nib0=0x2; nib7=0 & nib6 & nib5 & nib4=0x8 {}
+:SOUTI @nib5,@dnib1,nib6 is op8=0x3B & dnib1 & nib0=0x3; nib7=0 & nib6 & nib5 & nib4=0x8 {}
+:SOUTIB @nib5,@dnib1,nib6 is op8=0x3A & dnib1 & nib0=0x3; nib7=0 & nib6 & nib5 & nib4=0x8 {}
+
+# POP p 156
+# --- registers  ---
+# POP r1,@rr2
+:POP nib0,@dnib1 is op8=0x97 & dnib1 & nib0 {}
+# POPL rr1,@rr2
+:POPL dnib0,@dnib1 is op8=0x95 & dnib1 & dnib0 {}
+
+# --- indirect ---
+# POP @rr1,@rr2
+:POP @dnib0,@dnib1 is op8=0x17 & dnib1 & dnib0 {}
+
+# POPL @rr1,@rr2
+:POPL @dnib0,@dnib1 is op8=0x15 & dnib1 & dnib0 {}
+
+# --- direct address ---
+# POP address,@rr1
+:POP Addr32,@dnib1 is op8=0x57 & dnib1 & nib0=0; Addr32 {}
+
+# POPL address,@rr1
+:POPL Addr32,@dnib1 is op8=0x55 & dnib1 & nib0=0; Addr32 {}
+
+# --- indexed address ---
+# POP Addr32(rs),@rr1
+:POP Addr32(nib0),@dnib1 is op8=0x57 & dnib1 & nib0; Addr32 {}
+
+# POPL Addr32(rs),@rr1
+:POPL Addr32(nib0),@dnib1 is op8=0x55 & dnib1 & nib0; Addr32 {}
+
+# PUSH p 158
+# --- registers  ---
+# PUSH @rr1,r2
+:PUSH @dnib1,nib0 is op8=0x93 & dnib1 & nib0 {}
+# PUSHL rr1,@rr2
+:PUSHL @dnib1,dnib0 is op8=0x91 & dnib1 & dnib0 {}
+
+# --- immediate ---
+# PUSH @r1,#data
+:PUSH @dnib1,#imm16 is op8=0x0D & dnib1 & nib0=0x9; imm16 {}
+
+# --- indirect ---
+# PUSH @rr1,@rr2
+:PUSH @dnib0,@dnib1 is op8=0x13 & dnib1 & dnib0 {}
+
+# PUSHL @rr1,@rr2
+:PUSHL @dnib0,@dnib1 is op8=0x11 & dnib1 & dnib0 {}
+
+# --- direct address ---
+# PUSH @rr1,address
+:PUSH @dnib1,Addr32 is op8=0x53 & dnib1 & nib0=0; Addr32 {}
+
+# PUSHL @rr1,address
+:PUSHL @dnib1,Addr32 is op8=0x51 & dnib1 & nib0=0; Addr32 {}
+
+# --- indexed address ---
+# PUSH @rr1,Addr32(rs)
+:PUSH @dnib1,Addr32(nib0) is op8=0x53 & dnib1 & nib0; Addr32 {}
+
+# PUSHL @rr1,Addr32(rs)
+:PUSHL @dnib1,Addr32(nib0) is op8=0x51 & dnib1 & nib0; Addr32 {}
+
+# RES p 160
+# === dynamic ===
+# --- registers  ---
+# RES r1,r2
+:RES nib2,nib0 is op8=0x23 & nib1 & nib0; nib3=0 & nib2 & byte0=0 
+{
+    nib2 = nib2 & ~(1 << nib0);
+}
+
+# RESB r1,r2
+:RESB bnib2,nib0 is op8=0x22 & nib1=0 & nib0; nib3=0 & bnib2 & byte0=0 
+{
+    bnib2 = bnib2 & ~(1 << nib0);
+}
+
+# === static ===
+# --- registers ---
+# RES r1,#bit_index
+:RES nib1,#nib0 is op8=0xA3 & nib1 & nib0
+{
+    nib1 = nib1 & ~(1 << nib0);
+}
+
+# RESB r1,#bit_index
+:RESB bnib1,#nib0 is op8=0xA2 & bnib1 & nib0 
+{
+    bnib1 = bnib1 & ~(1 << nib0);
+}
+
+# --- indirect ---
+# RES @r1,#bit_index
+:RES @dnib1,#nib0 is op8=0x23 & dnib1 & nib0 
+{
+    local addr:4 = dnib1;
+    local tmp:2 = *[ram]addr;
+	*[ram]addr = tmp & ~(1 << nib0);
+}
+
+# RESB @r1,#bit_index
+:RESB @dnib1,#nib0 is op8=0x22 & dnib1 & nib0 
+{
+    local addr:4 = dnib1;
+	local tmp:1 = *[ram]:1 addr;
+    *[ram]:1 addr = tmp & ~(1 << nib0);
+}
+
+# --- direct address ---
+# RES Addr32,#bit_index
+:RES Addr32,#nib0 is op8=0x63 & nib1=0 & nib0; Addr32 
+{
+	local tmp:2 = *[ram]:2 Addr32;
+	*[ram]Addr32 =  tmp & ~(1 << nib0);
+}
+
+# RESB Addr32,#bit_index
+:RESB Addr32,#nib0 is op8=0x62 & nib1=0 & nib0; Addr32 
+{
+	local tmp:1 = *[ram]:2 Addr32;
+	*[ram]Addr32 =  tmp & ~(1 << nib0);
+}
+
+# --- indexed address ---
+# RES Addr32(rs),#bit_index
+:RES Addr32(nib1),#nib0 is op8=0x63 & nib1 & nib0; Addr32 
+{
+    local addr:4 = Addr32 + zext(nib1);
+    local tmp:2 = *[ram]addr;
+	*[ram]addr = tmp & ~(1 << nib0);
+}
+
+# RESB Addr32(rs),#bit_index
+:RESB Addr32(nib1),#nib0 is op8=0x62 & nib1 & nib0; Addr32 
+{
+    local addr:4 = Addr32 + zext(nib1);
+    local tmp:1 = *[ram]addr;
+	*[ram]addr = tmp & ~(1 << nib0);
+}
+
+# RESFLAG p 162
+# RESFLG (Reset/Clear Flag) - Uses Bitwise AND NOT (~ and &)
+:RESFLG flg_list is op8=0x8D & flg_list & flg_c & flg_z & flg_s & flg_v & nib0=0x3 
+{
+    cf = cf & ~flg_c;
+    zf = zf & ~flg_z;
+    sf = sf & ~flg_s;
+    vf = vf & ~flg_v;
+}
+
+# RET p 163
+:RET is op16=0x9E08 {}
+# FIXME cc
+# RET cc
+:RET nib0 is op8=0x9E & nib1=0 & nib0 {}
+
+# RL p 164
+# RL r1,#n
+:RL nib1,"#1" is op8=0xB3 & nib1 & nib0=0 {}
+:RL nib1,"#2" is op8=0xB3 & nib1 & nib0=2 {}
+
+# RLB r1,#n
+:RLB bnib1,"#1" is op8=0xB2 & bnib1 & nib0=0 {} 
+:RLB bnib1,"#1" is op8=0xB2 & bnib1 & nib0=2 {} 
+
+# RLC p 165
+# RLC r1,#n
+:RLC nib1,"#1" is op8=0xB3 & nib1 & nib0=0x8 {}
+:RLC nib1,"#2" is op8=0xB3 & nib1 & nib0=0xA {}
+
+# RLCB r1,#n
+:RLCB nib1,"#1" is op8=0xB2 & nib1 & nib0=0x8 {}
+:RLCB nib1,"#2" is op8=0xB2 & nib1 & nib0=0xA {}
+
+# RLDB p 166
+# RLDB r1,r2
+:RLDB nib0,nib1 is op8=0xBE & nib1 & nib0 {}
+
+# RR p 168
+# RR r1,#n
+:RR nib1,"#1" is op8=0xB3 & nib1 & nib0=0x4 {}
+:RR nib1,"#2" is op8=0xB3 & nib1 & nib0=0x6 {}
+
+# RRB r1,#n
+:RRB bnib1,"#1" is op8=0xB2 & bnib1 & nib0=0x4 {} 
+:RRB bnib1,"#1" is op8=0xB2 & bnib1 & nib0=0x6 {} 
+
+# RRC p 169
+# RRC r1,#n
+:RRC nib1,"#1" is op8=0xB3 & nib1 & nib0=0xC {}
+:RRC nib1,"#2" is op8=0xB3 & nib1 & nib0=0xE {}
+
+# RRCB r1,#n
+:RRCB nib1,"#1" is op8=0xB2 & nib1 & nib0=0xC {}
+:RRCB nib1,"#2" is op8=0xB2 & nib1 & nib0=0xE {}
+
+# RRDB p 170
+# RRDB r1,r2
+:RRDB nib0,nib1 is op8=0xBC & nib1 & nib0 {}
+
+# SBC p 172
+# --- registers  ---
+# SBC r1,r2
+:SBC nib0,nib1 is op8=0xB7 & nib1 & nib0 
+{
+    nib0 = nib0 - nib1;
+}
+
+# SBCB rx1,rx2
+:SBCB bnib0,bnib1 is op8=0xB6 & bnib1 & bnib0 
+{
+    bnib0 = bnib0 - bnib1;
+}
+
+# SC p 173
+# SC #data
+:SC #byte0 is op8=0x7F & byte0 {}
+
+# SDA p 175
+# SDA r1,r2
+:SDA nib1,nib2 is op8=0xB3 & nib1 & nib0=0xB; nib3=0 & nib2 & byte0=0 {}
+
+# SDAB rx1,r2
+:SDAB bnib1,nib2 is op8=0xB2 & bnib1 & nib0=0xB; nib3=0 & nib2 & byte0=0 {}
+
+# SDAL rr1,r2
+:SDAL dnib1,nib2 is op8=0xB3 & dnib1 & nib0=0xF; nib3=0 & nib2 & byte0=0 {}
+
+# SDL p 177
+# SDL r1,r2
+:SDL nib1,nib2 is op8=0xB3 & nib1 & nib0=0x3; nib3=0 & nib2 & byte0=0 {}
+
+# SDLB rx1,r2
+:SDLB bnib1,nib2 is op8=0xB2 & bnib1 & nib0=0x3; nib3=0 & nib2 & byte0=0 {}
+
+# SDLL rr1,r2
+:SDLL dnib1,nib2 is op8=0xB3 & dnib1 & nib0=0x7; nib3=0 & nib2 & byte0=0 {}
+
+# SET p 179
+# === dynamic ===
+# --- registers  ---
+# SET r1,r2
+:SET nib2,nib0 is op8=0x25 & nib1 & nib0; nib3=0 & nib2 & byte0=0 
+{
+    nib2 = nib2 | (1 << nib0);
+}
+
+# SETB r1,r2
+:SETB bnib2,nib0 is op8=0x24 & nib1=0 & nib0; nib3=0 & bnib2 & byte0=0 
+{
+    bnib2 = bnib2 | (1 << nib0);
+}
+
+# === static ===
+# --- registers ---
+# SET r1,#bit_index
+:SET nib1,#nib0 is op8=0xA5 & nib1 & nib0
+{
+    nib1 = nib1 | (1 << nib0);
+}
+
+# SETB r1,#bit_index
+:SETB bnib1,#nib0 is op8=0xA4 & bnib1 & nib0 
+{
+    bnib1 = bnib1 | (1 << nib0);
+}
+
+# --- indirect reg ---
+# SET @r1,#bit_index
+:SET @dnib1,#nib0 is op8=0x25 & dnib1 & nib0 
+{
+    local addr:4 = dnib1;
+    local tmp:2 = *[ram]addr;
+	*[ram]addr = tmp | (1 << nib0);
+}
+
+# SETB @r1,#bit_index
+:SETB @dnib1,#nib0 is op8=0x24 & dnib1 & nib0 
+{
+    local addr:4 = dnib1;
+	local tmp:1 = *[ram]:1 addr;
+    *[ram]:1 addr = tmp | (1 << nib0);
+}
+
+# --- direct address ---
+# SET Addr32,#bit_index
+:SET Addr32,#nib0 is op8=0x65 & nib1=0 & nib0; Addr32 
+{
+	local tmp:2 = *[ram]:2 Addr32;
+	*[ram]Addr32 =  tmp | (1 << nib0);
+}
+
+# SETB Addr32,#bit_index
+:SETB Addr32,#nib0 is op8=0x64 & nib1=0 & nib0; Addr32 
+{
+	local tmp:1 = *[ram]:2 Addr32;
+	*[ram]Addr32 =  tmp | (1 << nib0);
+}
+
+# --- indexed address ---
+# SET Addr32(rs),#bit_index
+:SET Addr32(nib1),#nib0 is op8=0x65 & nib1 & nib0; Addr32 
+{
+    local addr:4 = Addr32 + zext(nib1);
+    local tmp:2 = *[ram]addr;
+	*[ram]addr = tmp | (1 << nib0);
+}
+
+# SETB Addr32(rs),#bit_index
+:SETB Addr32(nib1),#nib0 is op8=0x64 & nib1 & nib0; Addr32 
+{
+    local addr:4 = Addr32 + zext(nib1);
+    local tmp:1 = *[ram]addr;
+	*[ram]addr = tmp | (1 << nib0);
+}
+
+# SETFLG p 181
+# SETFLG (Set Flag) - Uses Bitwise OR (|)
+:SETFLG flg_list is op8=0x8D & flg_list & flg_c & flg_z & flg_s & flg_v & nib0=0x1
+{
+    cf = cf | flg_c;
+    zf = zf | flg_z;
+    sf = sf | flg_s;
+    vf = vf | flg_v;
+}
+
+# SLA p 182
+# SLA r1,#n
+:SLA nib1,#imm16 is op8=0xB3 & nib1 & nib0=0x9; imm_sign=0 & imm16 {}
+:SLAB bnib1,#imm16 is op8=0xB2 & bnib1 & nib0=0x9; imm_sign=0 & imm16 {}
+:SLAL dnib1,#imm16 is op8=0xB3 & dnib1 & nib0=0xD; imm_sign=0 & imm16 {}
+
+# SLL p 184
+:SLL nib1,#imm16 is op8=0xB3 & nib1 & nib0=0x1; imm_sign=0 & imm16 {}
+:SLLB bnib1,#imm16 is op8=0xB2 & bnib1 & nib0=0x1; imm_sign=0 & imm16 {}
+:SLLL dnib1,#imm16 is op8=0xB3 & dnib1 & nib0=0x5; imm_sign=0 & imm16 {}
+
+# SRA p 186
+:SRA nib1,#imm16 is op8=0xB3 & nib1 & nib0=0x9; imm_sign=1 & imm16 {}
+:SRAB bnib1,#imm16 is op8=0xB2 & bnib1 & nib0=0x9; imm_sign=1 & imm16 {}
+:SRAL dnib1,#imm16 is op8=0xB3 & dnib1 & nib0=0xD; imm_sign=1 & imm16 {}
+
+# SRL p 188
+:SRL nib1,#imm16 is op8=0xB3 & nib1 & nib0=0x1; imm_sign=1 & imm16 {}
+:SRLB bnib1,#imm16 is op8=0xB2 & bnib1 & nib0=0x1; imm_sign=1 & imm16 {}
+:SRLL dnib1,#imm16 is op8=0xB3 & dnib1 & nib0=0x5; imm_sign=1 & imm16 {}
+
+# p 190 SUB
+# --- registers  ---
+# SUB r1,r2
+:SUB nib0,nib1 is op8=0x83 & nib1 & nib0 
+{
+    nib0 = nib0 - nib1;
+}
+
+# SUBB rx1,rx2
+:SUBB bnib0,bnib1 is op8=0x82 & bnib1 & bnib0 
+{
+    bnib0 = bnib0 - bnib1;
+}
+
+# SUBL rr1,rr2
+:SUBL dnib0,dnib1 is op8=0x92 & dnib0 & dnib1 
+{
+    dnib0 = dnib0 - dnib1;
+}
+
+# --- immediate ---
+# SUB r1,#val16
+:SUB nib0,#imm16 is op8=0x02 & nib1=0 & nib0; imm16 
+{
+    local imm_val:2 = imm16;
+    nib0 = nib0 - imm_val;
+}
+
+# SUBB rx1,#val16
+:SUBB bnib0,#imm16 is op8=0x03 & nib1=0 & bnib0; imm16 
+{
+    local imm_val:1 = imm16;
+    bnib0 = bnib0 - imm_val;
+}
+
+# SUBL r1,#val32
+:SUBL dnib0,#imm32 is op8=0x12 & dnib1=0 & dnib0; imm32 
+{
+    local imm_val:4 = imm32;
+    dnib0 = dnib0 - imm_val;
+}
+
+# --- indirect reg ---
+# SUB r1,@r2
+:SUB nib0,@dnib1 is op8=0x03 & dnib1 & nib0 
+{
+    local addr:4 = dnib1;
+    local mem_val:2 = *[ram]:2 addr;
+    nib0 = nib0 - mem_val;
+}
+
+# SUBB rx1,@r2
+:SUBB bnib0,@dnib1 is op8=0x02 & dnib1 & bnib0 
+{
+    local addr:4 = dnib1;
+    local mem_val:1 = *[ram]addr;
+    bnib0 = bnib0 - mem_val;
+}
+
+# SUBL r1,@r2
+:SUBL dnib0,@dnib1 is op8=0x12 & dnib1 & dnib0 
+{
+    local addr:4 = dnib1;
+    local mem_val:4 = *[ram]:4 addr;
+    dnib0 = dnib0 - mem_val;
+}
+
+# --- direct address ---
+# SUB r1,Addr32
+:SUB nib0,Addr32 is op8=0x43 & nib1=0 & nib0; Addr32 
+{
+    nib0 = nib0 - *[ram]Addr32;
+}
+
+# SUBB r1,Addr32
+:SUBB bnib0,Addr32 is op8=0x42 & nib1=0 & bnib0; Addr32 
+{
+    bnib0 = bnib0 - *[ram]Addr32;
+}
+
+# SUBL r1,Addr32
+:SUBL dnib0,Addr32 is op8=0x52 & nib1=0 & dnib0; Addr32 
+{
+    dnib0 = dnib0 - *[ram]Addr32;
+}
+
+# --- indexed address ---
+# SUB r1,Addr32(rs)
+:SUB nib0,Addr32(nib1) is op8=0x43 & nib1 & nib0; Addr32 
+{
+    local addr:4 = zext(nib1);
+    local mem_val:2 = *[ram]:2 (addr + zext(nib1));
+
+    nib0 = nib0 - mem_val:2;
+}
+
+# SUBB rx1,Addr32(rs)
+:SUBB bnib0,Addr32(nib1) is op8=0x42 & nib1 & bnib0; Addr32 
+{
+    local addr:4 = zext(nib1);
+    local mem_val:1 = *[ram]:1 (addr + zext(nib1));
+
+    bnib0 = bnib0 - mem_val;
+}
+
+# SUBL rr1,Addr32(rs)
+:SUBL dnib0,Addr32(nib1) is op8=0x52 & nib1 & dnib0; Addr32 
+{
+    local addr:4 = zext(nib1);
+    local mem_val:4 = *[ram]:4 (addr + zext(nib1));
+
+    dnib0 = dnib0 - mem_val;
+}
+
+# TCC p 192
+# TCC cc,r1
+:TCC cc_jp,nib1 is op8=0xAF & nib1 & eval_jp & cc_jp {}
+:TCCB cc_jp,bnib1 is op8=0xAE & bnib1 & eval_jp & cc_jp {}
+
+# TEST p 193
+# --- registers  ---
+# TEST r1
+:TEST nib1 is op8=0x8D & nib1 & nib0=4 
+{
+	goto inst_next;	#FIXME FUNCTION NOT IMPLEMENTED
+}
+
+# TESTB r1
+:TESTB bnib1 is op8=0x8C & bnib1 & nib0=4 
+{
+	goto inst_next;	#FIXME FUNCTION NOT IMPLEMENTED
+}
+
+# TESTL	rr1
+:TESTL dnib1 is op8=0x9C & dnib1 & nib0=0x8 
+{
+	goto inst_next;	#FIXME FUNCTION NOT IMPLEMENTED
+}
+
+# --- indirect reg ---
+# TEST @r1
+:TEST @dnib1 is op8=0x0D & dnib1 & nib0=4 
+{
+    local addr:4 = dnib1;
+    local mem_val:2 = *[ram]:2 addr;
+	local res:2 = mem_val;
+	goto inst_next;	#FIXME FUNCTION NOT IMPLEMENTED
+}
+
+# TESTB @r1
+:TESTB @dnib1 is op8=0x0C & dnib1 & nib0=4 
+{
+    local addr:4 = dnib1;
+    local mem_val:1 = *[ram]:1 addr;
+	local res:1 = mem_val;
+	goto inst_next;	#FIXME FUNCTION NOT IMPLEMENTED
+}
+
+# TESTL @r1
+:TESTL @dnib1 is op8=0x1C & dnib1 & nib0=0x8 
+{
+    local addr:4 = dnib1;
+    local mem_val:2 = *[ram]:2 addr;
+	local res:2 = mem_val;
+	goto inst_next;	#FIXME FUNCTION NOT IMPLEMENTED
+}
+
+# --- direct address ---
+# TEST Addr32
+:TEST Addr32 is op8=0x4D & nib1=0 & nib0=4; Addr32 
+{
+    local mem_val:2 = *[ram]Addr32;
+	goto inst_next;	#FIXME FUNCTION NOT IMPLEMENTED
+}
+
+# TESTB Addr32
+:TESTB Addr32 is op8=0x4C & nib1=0 & nib0=4; Addr32 
+{
+    local mem_val:1 = *[ram]Addr32;
+	goto inst_next;	#FIXME FUNCTION NOT IMPLEMENTED
+}
+
+# TESTL Addr32
+:TESTL Addr32 is op16=0x5C08; Addr32 
+{
+    local mem_val:2 = *[ram]Addr32;
+	goto inst_next;	#FIXME FUNCTION NOT IMPLEMENTED
+}
+
+# --- indexed address ---
+# TEST Addr32(rs)
+:TEST Addr32(nib1) is op8=0x4D & nib1 & nib0=4; Addr32 
+{
+    local addr:4 = zext(nib1);
+    local mem_val:2 = *[ram]:2 (addr + zext(nib1));
+	goto inst_next;	#FIXME FUNCTION NOT IMPLEMENTED
+}
+
+# TESTB Addr32(rs)
+:TESTB Addr32(nib1) is op8=0x4C & nib1 & nib0=4; Addr32 
+{
+    local addr:4 = zext(nib1);
+    local mem_val:1 = *[ram]:1 (addr + zext(nib1));
+	goto inst_next;	#FIXME FUNCTION NOT IMPLEMENTED
+}
+
+# TESTL Addr32(rs)
+:TESTL Addr32(nib1) is op8=0x5C & nib1 & nib0=8; Addr32 
+{
+    local addr:4 = zext(nib1);
+    local mem_val:4 = *[ram]:4 (addr + zext(nib1));
+	goto inst_next;	#FIXME FUNCTION NOT IMPLEMENTED
+}
+
+# TRDB p 195
+# TRDB @rr1,@rr2,rx
+:TRDB @dnib1,@dnib5,nib6 is op8=0xB8 & dnib1 & nib0=0x8; nib7=0 & nib6 & dnib5 & nib4=0 {}
+# TRDRB p 196
+:TRDRB @dnib1,@dnib5,nib6 is op8=0xB8 & dnib1 & nib0=0xC; nib7=0 & nib6 & dnib5 & nib4=0 {}
+# TRIB p 198
+:TRIB @dnib1,@dnib5,nib6 is op8=0xB8 & dnib1 & nib0=0x0; nib7=0 & nib6 & dnib5 & nib4=0 {}
+# TRIRB p 200
+:TRIRB @dnib1,@dnib5,nib6 is op8=0xB8 & dnib1 & nib0=0x4; nib7=0 & nib6 & dnib5 & nib4=0 {}
+# TRTDB p 202
+:TRTDB @dnib1,@dnib5,nib6 is op8=0xB8 & dnib1 & nib0=0xA; nib7=0 & nib6 & dnib5 & nib4=0 {}
+# TRTDRB p 203
+:TRTDRB @dnib1,@dnib5,nib6 is op8=0xB8 & dnib1 & nib0=0xE; nib7=0 & nib6 & dnib5 & nib4=0 {}
+# TRTIB p 205
+:TRTIB @dnib1,@dnib5,nib6 is op8=0xB8 & dnib1 & nib0=0x2; nib7=0 & nib6 & dnib5 & nib4=0 {}
+# TRTIRB p 207
+:TRTIRB @dnib1,@dnib5,nib6 is op8=0xB8 & dnib1 & nib0=0x6; nib7=0 & nib6 & dnib5 & nib4=0xE {}
+
+# TSET p 209
+# --- registers  ---
+# TSET r1
+:TSET nib1 is op8=0x8D & nib1 & nib0=0x6
+{
+	goto inst_next;	#FIXME FUNCTION NOT IMPLEMENTED
+}
+
+# TSETB r1
+:TSETB bnib1 is op8=0x8C & bnib1 & nib0=0x6
+{
+	goto inst_next;	#FIXME FUNCTION NOT IMPLEMENTED
+}
+
+# --- indirect reg ---
+# TSET @r1
+:TSET @dnib1 is op8=0x0D & dnib1 & nib0=0x6
+{
+    local addr:4 = dnib1;
+    local mem_val:2 = *[ram]:2 addr;
+	local res:2 = mem_val;
+	goto inst_next;	#FIXME FUNCTION NOT IMPLEMENTED
+}
+
+# TSETB @r1
+:TSETB @dnib1 is op8=0x0C & dnib1 & nib0=0x6
+{
+    local addr:4 = dnib1;
+    local mem_val:1 = *[ram]:1 addr;
+	local res:1 = mem_val;
+	goto inst_next;	#FIXME FUNCTION NOT IMPLEMENTED
+}
+
+# --- direct address ---
+# TSET Addr32
+:TSET Addr32 is op8=0x4D & nib1=0 & nib0=0x6; Addr32
+{
+    local mem_val:2 = *[ram]Addr32;
+	goto inst_next;	#FIXME FUNCTION NOT IMPLEMENTED
+}
+
+# TSETB Addr32
+:TSETB Addr32 is op8=0x4C & nib1=0 & nib0=0x6; Addr32
+{
+    local mem_val:1 = *[ram]Addr32;
+	goto inst_next;	#FIXME FUNCTION NOT IMPLEMENTED
+}
+
+# --- indexed address ---
+# TSET Addr32(rs)
+:TSET Addr32(nib1) is op8=0x4D & nib1 & nib0=0x6; Addr32
+{
+    local addr:4 = zext(nib1);
+    local mem_val:2 = *[ram]:2 (addr + zext(nib1));
+	goto inst_next;	#FIXME FUNCTION NOT IMPLEMENTED
+}
+
+# TSETB Addr32(rs)
+:TSETB Addr32(nib1) is op8=0x4C & nib1 & nib0=0x6; Addr32
+{
+    local addr:4 = zext(nib1);
+    local mem_val:1 = *[ram]:1 (addr + zext(nib1));
+	goto inst_next;	#FIXME FUNCTION NOT IMPLEMENTED
+}
+
+# XOR p 211
+# --- registers  ---
+# XOR r1,r2
+:XOR nib0,nib1 is op8=0x89 & nib1 & nib0 
+{
+    nib0 = nib0 ^ nib1;
+}
+
+# XORB r1,r2
+:XORB bnib0,bnib1 is op8=0x88 & bnib1 & bnib0 
+{
+    bnib0 = bnib0 ^ bnib1;
+}
+
+# --- immediate ---
+# XOR r1,#val16
+:XOR nib0,#imm16 is op8=0x09 & nib1=0 & nib0; imm16 
+{
+    local imm_val:2 = imm16;
+    nib0 = nib0 ^ imm_val;
+}
+
+# XORB r1,#val16
+:XORB bnib0,#imm16 is op8=0x08 & nib1=0 & bnib0; imm16 
+{
+    local imm_val:1 = imm16;
+    bnib0 = bnib0 ^ imm_val;
+}
+
+# --- indirect reg ---
+# XOR r1,@r2
+:XOR nib0,@dnib1 is op8=0x09 & dnib1 & nib0 
+{
+    local addr:4 = dnib1;
+    local mem_val:2 = *[ram]:2 addr;
+
+    nib0 = nib0 ^ mem_val;
+}
+
+# XORB r1,@r2
+:XORB bnib0,@dnib1 is op8=0x08 & dnib1 & bnib0 
+{
+    local addr:4 = dnib1;
+    local mem_val:1 = *[ram]addr;
+    bnib0 = bnib0 ^ mem_val;
+}
+
+# --- direct address ---
+# XOR r1,Addr32
+:XOR nib0,Addr32 is op8=0x49 & nib1=0 & nib0; Addr32 
+{
+    nib0 = nib0 ^ *[ram]Addr32;
+}
+
+# XORB r1,Addr32
+:XORB bnib0,Addr32 is op8=0x48 & nib1=0 & bnib0; Addr32 
+{
+    bnib0 = bnib0 ^ *[ram]Addr32;
+}
+
+# --- indexed address ---
+# XOR r1,Addr32(rs)
+:XOR nib0,Addr32(nib1) is op8=0x49 & nib1 & nib0; Addr32 
+{
+    local addr:4 = zext(nib1);
+    local mem_val:2 = *[ram]:2 (addr + zext(nib1));
+
+    nib0 = nib0 ^ mem_val:2;
+}
+
+# XORB r1,Addr32(rs)
+:XORB bnib0,Addr32(nib1) is op8=0x48 & nib1 & bnib0; Addr32 
+{
+    local addr:4 = zext(nib1);
+    local mem_val:1 = *[ram]:1 (addr + zext(nib1));
+
+    bnib0 = bnib0 ^ mem_val;
+}
