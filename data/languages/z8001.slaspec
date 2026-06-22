@@ -1620,8 +1620,8 @@ eval_jp: is cc_jp
 # EXB r1,Addr32(rs)
 :EXB bnib0,Addr32(nib1) is op8=0x6C & nib1 & bnib0; Addr32 
 {
-    local addr:4 = Addr32 + zext(nib1);		#FIXME Use that for other instructions
-    local mem_val:1 = *[ram]addr;	        #FIXME Use that for other instructions
+    local addr:4 = Addr32 + zext(nib1);
+    local mem_val:1 = *[ram]addr;
     *[ram]addr = bnib0;
 	bnib0 = mem_val;
 }
@@ -1998,53 +1998,50 @@ eval_jp: is cc_jp
 }
 
 # --- base index ---
-# LD r1,r2(rx)
-:LD nib0,nib1(nib6) is op8=0x71 & nib1 & nib0; nib7=0 & nib6 & byte0=0 
+# LD r1,rr2(rx)
+:LD nib0,dnib1(nib6) is op8=0x71 & dnib1 & nib0; nib7=0 & nib6 & byte0=0 
 {
+    local addr:4 = dnib1 + zext(nib6);
+    nib0 = *[ram]addr;
 }
 
-# LDB rx1,r2(rx)
-:LDB bnib0,nib1(nib6) is op8=0x70 & nib1 & bnib0; nib7=0 & nib6 & byte0=0 
+# LDB rx1,rr2(rx)
+:LDB bnib0,dnib1(nib6) is op8=0x70 & dnib1 & bnib0; nib7=0 & nib6 & byte0=0 
 {
+    local addr:4 = dnib1 + zext(nib6);
+    bnib0 = *[ram]addr;
 }
 
-# LDL rr1,r2(rx)
-:LDL dnib0,nib1(nib6) is op8=0x75 & nib1 & dnib0; nib7=0 & nib6 & byte0=0 
+# LDL rr1,rr2(rx)
+:LDL dnib0,dnib1(nib6) is op8=0x75 & dnib1 & dnib0; nib7=0 & nib6 & byte0=0 
 {
+    local addr:4 = dnib1 + zext(nib6);
+    dnib0 = *[ram]addr;
 }
 
 # ---------------------------------------------------------
 # Load Memory
 # ---------------------------------------------------------
 # --- indirect ---
-# LD @r1,r2
-:LD @nib1,nib0 is op8=0x2F & nib1 & nib0 
+# LD @rr1,r2
+:LD @dnib1,nib0 is op8=0x2F & dnib1 & nib0 
 {
-#    local target:4;
-#    getLinearAddress(nib1,target);
-    
-    # Write the 16-bit register value out to RAM
-#    *:2 target = nib0;
+    local addr:4 = dnib1;
+    *[ram]addr = nib0;
 }
 
-# LDB @r1,rx2
-:LDB @nib1,bnib0 is op8=0x2E & nib1 & bnib0 
+# LDB @rr1,rx2
+:LDB @dnib1,bnib0 is op8=0x2E & dnib1 & bnib0 
 {
-#    local target:4;
-#    getLinearAddress(nib1,target);
-    
-    # Write the 8-bit register value out to RAM
-#    *:1 target = bnib0;
+    local addr:4 = dnib1;
+    *[ram]addr = bnib0;
 }
 
-# LDL @r1,rr2
-:LDL @nib1,dnib0 is op8=0x1D & nib1 & dnib0 
+# LDL @rr1,rr2
+:LDL @dnib1,dnib0 is op8=0x1D & dnib1 & dnib0 
 {
-#    local target:4;
-#    getLinearAddress(dnib1,target);
-    
-    # Write the 32-bit register value out to RAM
-#    *:4 target = dnib0;
+    local addr:4 = dnib1;
+    *[ram]addr = dnib0;
 }
 
 # --- direct address ---
@@ -2112,18 +2109,24 @@ eval_jp: is cc_jp
 
 # --- base index ---
 # LD r1(rx),r2
-:LD nib1(nib6),nib0 is op8=0x73 & nib1 & nib0; nib7=0 & nib6 & byte0=0 
+:LD dnib1(nib6),nib0 is op8=0x73 & dnib1 & nib0; nib7=0 & nib6 & byte0=0 
 {
+    local addr:4 = dnib1 + zext(nib6);
+    *[ram]addr = nib0;
 }
 
 # LDB r1(rx),rx2
-:LDB nib1(nib6),bnib0 is op8=0x72 & nib1 & bnib0; nib7=0 & nib6 & byte0=0 
+:LDB dnib1(nib6),bnib0 is op8=0x72 & dnib1 & bnib0; nib7=0 & nib6 & byte0=0 
 {
+    local addr:4 = dnib1 + zext(nib6);
+    *[ram]addr = bnib0;
 }
 
 # LDL r1(rx),rr2
-:LDL nib1(nib6),dnib0 is op8=0x77 & nib1 & dnib0; nib7=0 & nib6 & byte0=0 
+:LDL dnib1(nib6),dnib0 is op8=0x77 & dnib1 & dnib0; nib7=0 & nib6 & byte0=0 
 {
+    local addr:4 = dnib1 + zext(nib6);
+    *[ram]addr = dnib0;
 }
 
 # ---------------------------------------------------------
@@ -2149,14 +2152,18 @@ eval_jp: is cc_jp
 }
 
 # --- indirect ---
-# LD @r1,#0x1234
-:LD @nib1,#imm16 is op8=0x0D & nib1 & nib0=0x5; imm16 
+# LD @rr1,#0x1234
+:LD @dnib1,#imm16 is op8=0x0D & dnib1 & nib0=0x5; imm16 
 {
+    local addr:4 = dnib1;
+    *[ram]:2 addr = imm16;
 }
 
-# LDB @r1,#0x1234
-:LDB @nib1,#imm16 is op8=0x0C & nib1 & nib0=0x5; imm16 
+# LDB @rr1,#0x1234
+:LDB @dnib1,#imm16 is op8=0x0C & dnib1 & nib0=0x5; imm16 
 {
+    local addr:4 = dnib1;
+    *[ram]:1 addr = imm16;
 }
 
 # --- direct address ---
