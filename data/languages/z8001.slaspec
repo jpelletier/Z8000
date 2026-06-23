@@ -276,30 +276,30 @@ macro set_zs_d(result)
 
 # ADC, ADD, SBC, SUB
 # Arguments: Destination, Operand1, Operand2, Result, CarryIn
-macro set_fl_8(dest, op1, op2, res, cin) {
+macro set_fl_8(dst, op1, op2, res, cin) {
     cf = (res < op1) || ((cin == 1) && (res == op1));
     zf = (res == 0);
     sf = (res >= 0x80);
     vf = (((op1 ^ res) & (op2 ^ res)) >= 0x80);
 	df = 0;
 	hf = (((op1 ^ op2 ^ res) & 0x10) == 0x10);
-    dest = res;
+    dst = res;
 }
 
-macro set_fl_16(dest, op1, op2, res, cin) {
+macro set_fl_16(dst, op1, op2, res, cin) {
     cf = (res < op1) || ((cin == 1) && (res == op1));
     zf = (res == 0);
     sf = (res >= 0x8000);
     vf = (((op1 ^ res) & (op2 ^ res)) >= 0x8000);
-    dest = res;
+    dst = res;
 }
 
-macro set_fl_32(dest, op1, op2, res, cin) {
+macro set_fl_32(dst, op1, op2, res, cin) {
     cf = (res < op1) || ((cin == 1) && (res == op1));
     zf = (res == 0);
     sf = (res >= 0x80000000);
     vf = (((op1 ^ res) & (op2 ^ res)) >= 0x80000000);
-    dest = res;
+    dst = res;
 }
 
 # CP
@@ -1198,12 +1198,10 @@ eval_jp: is cc_jp
 # CPD: Compare and Decrement
 :CPD nib5,@dnib1,nib6,cc_jp is op8=0xBB & dnib1 & nib0=0x8; nib7=0 & nib6 & nib5 & eval_jp & cc_jp 
 {
-    local mem = *[ram]dnib1;
-    local src = nib5;
-    
-    zf = (src == mem);
-    sf = (src < mem);
-    
+    local dst = nib5;
+    local src = *[ram]dnib1;
+
+    zf = (dst == src);
     nib6 = nib6 - 1;
     vf = (nib6 == 0);
     dnib1 = dnib1 - 2;
@@ -1212,12 +1210,10 @@ eval_jp: is cc_jp
 # CPDB: Compare and Decrement
 :CPDB bnib5,@dnib1,nib6,cc_jp is op8=0xBA & dnib1 & nib0=0x8; nib7=0 & nib6 & bnib5 & eval_jp & cc_jp 
 {
-    local mem:1 = *[ram]dnib1;
-    local src = bnib5;
-    
-    zf = (src == mem);
-    sf = (src < mem);
-    
+    local dst = bnib5;
+    local src:1 = *[ram]dnib1;
+
+    zf = (dst == src);
     nib6 = nib6 - 1;
     vf = (nib6 == 0);
     dnib1 = dnib1 - 1;
@@ -1228,12 +1224,10 @@ eval_jp: is cc_jp
 :CPDR nib5,@dnib1,nib6,cc_jp is op8=0xBB & dnib1 & nib0=0xC; nib7=0 & nib6 & nib5 & eval_jp & cc_jp  
 {
 <loop_start>
-    local mem = *[ram]dnib1;
-    local src = nib5;
-    
-    zf = (src == mem);
-    sf = (src < mem);
-    
+    local dst = nib5;
+    local src = *[ram]dnib1;
+
+    zf = (dst == src);
     nib6 = nib6 - 1;
     vf = (nib6 == 0);
     dnib1 = dnib1 - 2;
@@ -1245,12 +1239,10 @@ eval_jp: is cc_jp
 :CPDRB bnib5,@dnib1,nib6,cc_jp is op8=0xBA & dnib1 & nib0=0xC; nib7=0 & nib6 & bnib5 & eval_jp & cc_jp  
 {
 <loop_start>
-    local mem:1 = *[ram]dnib1;
+    local dst:1 = *[ram]dnib1;
     local src = bnib5;
     
-    zf = (src == mem);
-    sf = (src < mem);
-    
+    zf = (dst == src);
     nib6 = nib6 - 1;
     vf = (nib6 == 0);
     dnib1 = dnib1 - 1;
@@ -1262,12 +1254,10 @@ eval_jp: is cc_jp
 # CPI: Compare and Increment
 :CPI nib5,@dnib1,nib6,cc_jp is op8=0xBB & dnib1 & nib0=0; nib7=0 & nib6 & nib5 & eval_jp & cc_jp 
 {
-    local mem = *[ram]dnib1;
+    local dst = *[ram]dnib1;
     local src = nib5;
     
-    zf = (src == mem);
-    sf = (src < mem);
-    
+    zf = (dst == src);
     nib6 = nib6 - 1;
     vf = (nib6 == 0);
     dnib1 = dnib1 + 2;
@@ -1276,12 +1266,10 @@ eval_jp: is cc_jp
 # CPIB: Compare and Increment
 :CPIB bnib5,@dnib1,nib6,cc_jp is op8=0xBA & dnib1 & nib0=0; nib7=0 & nib6 & bnib5 & eval_jp & cc_jp 
 {
-    local mem:1 = *[ram]dnib1;
+    local dst:1 = *[ram]dnib1;
     local src = bnib5;
     
-    zf = (src == mem);
-    sf = (src < mem);
-    
+    zf = (dst == src);
     nib6 = nib6 - 1;
     vf = (nib6 == 0);
     dnib1 = dnib1 + 1;
@@ -1297,12 +1285,10 @@ eval_jp: is cc_jp
 :CPIR nib5,@dnib1,nib6,cc_jp is op8=0xBB & dnib1 & nib0=0x4; nib7=0 & nib6 & nib5 & eval_jp & cc_jp 
 {
 <loop_start>
-    local mem = *[ram]dnib1;
+    local dst = *[ram]dnib1;
     local src = nib5;
     
-    zf = (src == mem);
-    sf = (src < mem);
-    
+    zf = (dst == src);
     nib6 = nib6 - 1;
     vf = (nib6 == 0);
     dnib1 = dnib1 + 2;
@@ -1314,12 +1300,10 @@ eval_jp: is cc_jp
 :CPIRB bnib5,@dnib1,nib6,cc_jp is op8=0xBA & dnib1 & nib0=0x4; nib7=0 & nib6 & bnib5 & eval_jp & cc_jp 
 {
 <loop_start>
-    local mem:1 = *[ram]dnib1;
+    local dst:1 = *[ram]dnib1;
     local src = bnib5;
     
-    zf = (src == mem);
-    sf = (src < mem);
-    
+    zf = (dst == src);
     nib6 = nib6 - 1;
     vf = (nib6 == 0);
     dnib1 = dnib1 + 1;
@@ -2391,22 +2375,22 @@ eval_jp: is cc_jp
 
 # LDD p 123
 # LDD @rr1,@rr2,r
-:LDD @dnib1,@dnib5,nib6  is op8=0xBB & dnib1 & nib0=0x9; nib7=0 & nib6 & dnib5 & nib4=0x8
+:LDD @dnib5,@dnib1,nib6  is op8=0xBB & dnib1 & nib0=0x9; nib7=0 & nib6 & dnib5 & nib4=0x8
 {
-    local dest:4 = dnib1;
-    local src:4 = dnib5;
-	*[ram]:2 dest = *[ram]:2 src;
+    local dst:4 = dnib5;
+    local src:4 = dnib1;
+	*[ram]:2 dst = *[ram]:2 src;
 	dnib1 = dnib1-2;
 	dnib5 = dnib5-2;
 	nib6 = nib6-1;
 	vf = (nib6 == 0);
 }
 
-:LDDB @dnib1,@dnib5,nib6 is op8=0xBA & dnib1 & nib0=0x9; nib7=0 & nib6 & dnib5 & nib4=0x8
+:LDDB @dnib5,@dnib1,nib6 is op8=0xBA & dnib1 & nib0=0x9; nib7=0 & nib6 & dnib5 & nib4=0x8
 {
-    local dest:4 = dnib1;
-    local src:4 = dnib5;
-	*[ram]:1 dest = *[ram]:1 src;
+    local dst:4 = dnib5;
+    local src:4 = dnib1;
+	*[ram]:1 dst = *[ram]:1 src;
 	dnib1 = dnib1-1;
 	dnib5 = dnib5-1;
 	nib6 = nib6-1;
@@ -2415,11 +2399,11 @@ eval_jp: is cc_jp
 
 # LDDR p 124
 # LDDR @rr1,@rr2,r
-:LDDR @dnib1,@dnib5,nib6  is op8=0xBB & dnib1 & nib0=0x9; nib7=0 & nib6 & dnib5 & nib4=0
+:LDDR @dnib5,@dnib1,nib6  is op8=0xBB & dnib1 & nib0=0x9; nib7=0 & nib6 & dnib5 & nib4=0
 {
-    local dest:4 = dnib1;
-    local src:4 = dnib5;
-	*[ram]:2 dest = *[ram]:2 src;
+    local dst:4 = dnib5;
+    local src:4 = dnib1;
+	*[ram]:2 dst = *[ram]:2 src;
 	dnib1 = dnib1-2;
 	dnib5 = dnib5-2;
 	nib6 = nib6-1;
@@ -2427,11 +2411,11 @@ eval_jp: is cc_jp
 	vf = 1;
 }
 
-:LDDRB @dnib1,@dnib5,nib6 is op8=0xBA & dnib1 & nib0=0x9; nib7=0 & nib6 & dnib5 & nib4=0
+:LDDRB @dnib5,@dnib1,nib6 is op8=0xBA & dnib1 & nib0=0x9; nib7=0 & nib6 & dnib5 & nib4=0
 {
-    local dest:4 = dnib1;
-    local src:4 = dnib5;
-	*[ram]:1 dest = *[ram]:1 src;
+    local dst:4 = dnib5;
+    local src:4 = dnib1;
+	*[ram]:1 dst = *[ram]:1 src;
 	dnib1 = dnib1-1;
 	dnib5 = dnib5-1;
 	nib6 = nib6-1;
@@ -2441,22 +2425,22 @@ eval_jp: is cc_jp
 
 # LDI p 126
 # LDI @rr1,@rr2,r
-:LDI @dnib1,@dnib5,nib6  is op8=0xBB & dnib1 & nib0=0x1; nib7=0 & nib6 & dnib5 & nib4=0x8
+:LDI @dnib5,@dnib1,nib6  is op8=0xBB & dnib1 & nib0=0x1; nib7=0 & nib6 & dnib5 & nib4=0x8
 {
-    local dest:4 = dnib1;
-    local src:4 = dnib5;
-	*[ram]:2 dest = *[ram]:2 src;
+    local dst:4 = dnib5;
+    local src:4 = dnib1;
+	*[ram]:2 dst = *[ram]:2 src;
 	dnib1 = dnib1+2;
 	dnib5 = dnib5+2;
 	nib6 = nib6-1;
 	vf = (nib6 == 0);
 }
 
-:LDIB @dnib1,@dnib5,nib6 is op8=0xBA & dnib1 & nib0=0x1; nib7=0 & nib6 & dnib5 & nib4=0x8
+:LDIB @dnib5,@dnib1,nib6 is op8=0xBA & dnib1 & nib0=0x1; nib7=0 & nib6 & dnib5 & nib4=0x8
 {
-    local dest:4 = dnib1;
-    local src:4 = dnib5;
-	*[ram]:1 dest = *[ram]:1 src;
+    local dst:4 = dnib5;
+    local src:4 = dnib1;
+	*[ram]:1 dst = *[ram]:1 src;
 	dnib1 = dnib1+1;
 	dnib5 = dnib5+1;
 	nib6 = nib6-1;
@@ -2465,11 +2449,11 @@ eval_jp: is cc_jp
 
 # LDIR p 127
 # LDIR @rr1,@rr2,r
-:LDIR @dnib1,@dnib5,nib6  is op8=0xBB & dnib1 & nib0=0x1; nib7=0 & nib6 & dnib5 & nib4=0
+:LDIR @dnib5,@dnib1,nib6  is op8=0xBB & dnib1 & nib0=0x1; nib7=0 & nib6 & dnib5 & nib4=0
 {
-    local dest:4 = dnib1;
-    local src:4 = dnib5;
-	*[ram]:2 dest = *[ram]:2 src;
+    local dst:4 = dnib5;
+    local src:4 = dnib1;
+	*[ram]:2 dst = *[ram]:2 src;
 	dnib1 = dnib1+2;
 	dnib5 = dnib5+2;
 	nib6 = nib6-1;
@@ -2477,11 +2461,11 @@ eval_jp: is cc_jp
 	vf = 1;
 }
 
-:LDIRB @dnib1,@dnib5,nib6 is op8=0xBA & dnib1 & nib0=0x1; nib7=0 & nib6 & dnib5 & nib4=0
+:LDIRB @dnib5,@dnib1,nib6 is op8=0xBA & dnib1 & nib0=0x1; nib7=0 & nib6 & dnib5 & nib4=0
 {
-    local dest:4 = dnib1;
-    local src:4 = dnib5;
-	*[ram]:1 dest = *[ram]:1 src;
+    local dst:4 = dnib5;
+    local src:4 = dnib1;
+	*[ram]:1 dst = *[ram]:1 src;
 	dnib1 = dnib1+1;
 	dnib5 = dnib5+1;
 	nib6 = nib6-1;
