@@ -10,7 +10,7 @@ define alignment=2;
 # 4 bytes tracking the 32-bit (Segment + Offset) storage space
 define space ram         type=ram_space      size=4 wordsize=2 default; 
 define space register    type=register_space size=4;
-
+define space io			 type=ram_space		 size=2;
 # ---------------------------------------------------------
 # 8-bit registers (1 byte each,overlapping r0 through r7)
 define register offset=0x00 size=1 [ rh0 rl0 rh1 rl1 rh2 rl2 rh3 rl3 rh4 rl4 rh5 rl5 rh6 rl6 rh7 rl7 ];
@@ -414,6 +414,26 @@ macro check_base_cc(base,z,s,v,c,result)
     <c6> result = c; goto <exit>;
     
     <exit>
+}
+
+macro IoWrite(port,value)
+{
+	*[io]:2 port = value;
+}
+
+macro IoRead(port,value)
+{
+	value = *[io]:2 port;
+}
+
+macro IoWriteByte(port,value)
+{
+	*[io]:1 port = value;
+}
+
+macro IoReadByte(port,value)
+{
+	value = *[io]:1 port;
 }
 
 # ---------------------------------------------------------
@@ -1757,26 +1777,34 @@ eval_jp: is cc_jp
 # IN r1,@r2
 :IN nib0,@nib1 is op8=0x3D & nib1 & nib0 
 {
+    local port:2 = nib1;
+	IoRead(port,nib0);
 }
 
 :INB bnib0,@nib1 is op8=0x3C & nib1 & bnib0 
 {
+    local port:2 = nib1;
+	IoReadByte(port,bnib0);
 }
 
 :IN nib1,imm16 is op8=0x3B & nib1 & nib0=0x4; imm16 
 {
+	nib1 = *[io]:2 imm16:2;
 }
 
 :INB bnib1,imm16 is op8=0x3A & bnib1 & nib0=0x4; imm16 
 {
+	bnib1 = *[io]:1 imm16:2;
 }
 
 :SIN nib1,imm16 is op8=0x3B & nib1 & nib0=0x5; imm16 
 {
+	nib1 = *[io]:2 imm16:2;
 }
 
 :SINB bnib1,imm16 is op8=0x3A & bnib1 & nib0=0x5; imm16 
 {
+	bnib1 = *[io]:1 imm16:2;
 }
 
 # INC p 98
@@ -1864,7 +1892,7 @@ eval_jp: is cc_jp
 }
 
 # IND/SIND p 99
-:IND @nib5,@nib1,nib6 is op8=0x3B & nib1 & nib0=0; nib7=0 & nib6 & nib5 & nib4=0x8 
+:IND @dnib5,@nib1,nib6 is op8=0x3B & nib1 & nib0=0; nib7=0 & nib6 & dnib5 & nib4=0x8 
 {
 }
 
@@ -2809,14 +2837,38 @@ eval_jp: is cc_jp
 # OUT/SOUT p 152
 # --- indirect ---
 # OUT @r1,r2
-:OUT @nib1,nib0 is op8=0x3F & nib1 & nib0 {}
-:OUTB @nib1,nib0 is op8=0x3E & nib1 & nib0 {}
+:OUT @nib1,nib0 is op8=0x3F & nib1 & nib0
+{
+    local port:2 = nib1;
+	IoWrite(port,nib0);
+}
+
+:OUTB @nib1,bnib0 is op8=0x3E & nib1 & bnib0
+{
+    local port:2 = nib1;
+	IoWriteByte(port,bnib0);
+}
 
 # --- direct address ---
-:OUT imm16,nib1 is op8=0x3B & nib1 & nib0=0x6; imm16 {}
-:OUTB imm16,bnib1 is op8=0x3A & bnib1 & nib0=0x6; imm16 {}
-:SOUT imm16,nib1 is op8=0x3B & nib1 & nib0=0x7; imm16 {}
-:SOUTB imm16,bnib1 is op8=0x3A & bnib1 & nib0=0x7; imm16 {}
+:OUT imm16,nib1 is op8=0x3B & nib1 & nib0=0x6; imm16
+{
+	*[io]:2 imm16:2 = nib1;
+}
+
+:OUTB imm16,bnib1 is op8=0x3A & bnib1 & nib0=0x6; imm16
+{
+	*[io]:1 imm16:2 = bnib1;
+}
+
+:SOUT imm16,nib1 is op8=0x3B & nib1 & nib0=0x7; imm16
+{
+	*[io]:2 imm16:2 = nib1;
+}
+
+:SOUTB imm16,bnib1 is op8=0x3A & bnib1 & nib0=0x7; imm16
+{
+	*[io]:1 imm16:2 = bnib1;
+}
 
 # OUTD/SOUTD p 153
 # OUTD @r1,@rr2,r
