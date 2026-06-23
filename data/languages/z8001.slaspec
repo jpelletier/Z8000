@@ -126,7 +126,7 @@ define token data32 (32)
 # ---------------------------------------------------------
 # Attach Sections
 # ---------------------------------------------------------
-attach names [ cc_jp cc_jr ] 
+attach names [ cc_jp cc_jr nib4] 
 [
     "F" "LT" "LE" "ULE" "OV"  "MI" "Z"  "C"
     "T" "GE" "GT" "UGT" "NOV" "PL" "NZ" "NC"
@@ -259,19 +259,19 @@ macro pop32(dst)
 macro set_zs_b(result) 
 {
     zf = (result == 0:1);
-    sf = ((result & 0x80:1) != 0:1);
+    sf = (result >= 0x80);
 }
 
 macro set_zs_w(result) 
 {
     zf = (result == 0:2);
-    sf = ((result & 0x8000:2) != 0:2);
+    sf = (result >= 0x8000);
 }
 
 macro set_zs_d(result) 
 {
     zf = (result == 0:4);
-    sf = ((result & 0x80000000:4) != 0:4);
+    sf = (result >= 0x80000000);
 }
 
 # ADC, ADD, SBC, SUB
@@ -610,8 +610,8 @@ eval_jp: is cc_jp
 # ADD r1,Addr32(rs)
 :ADD nib0,Addr32(nib1) is op8=0x41 & nib1 & nib0; Addr32 
 {
-	local op1:2 = nib0;
     local addr:4 = zext(nib1);
+	local op1:2 = nib0;
     local op2 = *[ram](addr + zext(nib1));
     local result:2 = op1 + op2;
 	set_fl_16(nib0, op1, op2, result, cf);
@@ -1198,45 +1198,45 @@ eval_jp: is cc_jp
 # CPD: Compare and Decrement
 :CPD nib5,@dnib1,nib6,cc_jp is op8=0xBB & dnib1 & nib0=0x8; nib7=0 & nib6 & nib5 & eval_jp & cc_jp 
 {
-#    local mem_byte:1 = *[ram]dnib1;
-#    local src_byte:1 = nib5:1;
+    local mem = *[ram]dnib1;
+    local src = nib5;
     
-#    zf = (src_byte == mem_byte);
-#    sf = (src_byte < mem_byte);
+    zf = (src == mem);
+    sf = (src < mem);
     
-#    nib6 = nib6 - 1:2;
-#    vf = (nib6 != 0:2);
-#    dnib1 = dnib1 - 2:4;
+    nib6 = nib6 - 1;
+    vf = (nib6 == 0);
+    dnib1 = dnib1 - 2;
 }
 
 # CPDB: Compare and Decrement
 :CPDB bnib5,@dnib1,nib6,cc_jp is op8=0xBA & dnib1 & nib0=0x8; nib7=0 & nib6 & bnib5 & eval_jp & cc_jp 
 {
-#    local mem_byte = *[ram]dnib1;
-#    local src_byte = bnib5;
-#    
-#    zf = (src_byte == mem_byte);
-#    sf = (src_byte < mem_byte);
+    local mem:1 = *[ram]dnib1;
+    local src = bnib5;
     
-#    nib6 = nib6 - 1:2;
-#    vf = (nib6 != 0:2);
-#    dnib1 = dnib1 - 1:4;
+    zf = (src == mem);
+    sf = (src < mem);
+    
+    nib6 = nib6 - 1;
+    vf = (nib6 == 0);
+    dnib1 = dnib1 - 1;
 }
 
 # p 73
 # CPDR: Compare,Decrement,and Repeat
 :CPDR nib5,@dnib1,nib6,cc_jp is op8=0xBB & dnib1 & nib0=0xC; nib7=0 & nib6 & nib5 & eval_jp & cc_jp  
 {
-    <loop_start>
-    local mem_byte:1 = *[ram]dnib1;
-    local src_byte:1 = nib5:1;
+<loop_start>
+    local mem = *[ram]dnib1;
+    local src = nib5;
     
-    zf = (src_byte == mem_byte);
-    sf = (src_byte < mem_byte);
+    zf = (src == mem);
+    sf = (src < mem);
     
-    nib6 = nib6 - 1:2;
-    vf = (nib6 != 0:2);
-    dnib1 = dnib1 - 2:4;
+    nib6 = nib6 - 1;
+    vf = (nib6 == 0);
+    dnib1 = dnib1 - 2;
     
     if (vf && !zf) goto <loop_start>;
 }
@@ -1244,16 +1244,16 @@ eval_jp: is cc_jp
 # CPDRB: Compare,Decrement,and Repeat
 :CPDRB bnib5,@dnib1,nib6,cc_jp is op8=0xBA & dnib1 & nib0=0xC; nib7=0 & nib6 & bnib5 & eval_jp & cc_jp  
 {
-    <loop_start>
-    local mem_byte:1 = *[ram]dnib1;
-    local src_byte = bnib5;
+<loop_start>
+    local mem:1 = *[ram]dnib1;
+    local src = bnib5;
     
-    zf = (src_byte == mem_byte);
-    sf = (src_byte < mem_byte);
+    zf = (src == mem);
+    sf = (src < mem);
     
-    nib6 = nib6 - 1:2;
-    vf = (nib6 != 0:2);
-    dnib1 = dnib1 - 1:4;
+    nib6 = nib6 - 1;
+    vf = (nib6 == 0);
+    dnib1 = dnib1 - 1;
     
     if (vf && !zf) goto <loop_start>;
 }
@@ -1262,29 +1262,29 @@ eval_jp: is cc_jp
 # CPI: Compare and Increment
 :CPI nib5,@dnib1,nib6,cc_jp is op8=0xBB & dnib1 & nib0=0; nib7=0 & nib6 & nib5 & eval_jp & cc_jp 
 {
-    local mem_byte:1 = *[ram]dnib1;
-    local src_byte:1 = nib5:1;
+    local mem = *[ram]dnib1;
+    local src = nib5;
     
-    zf = (src_byte == mem_byte);
-    sf = (src_byte < mem_byte);
+    zf = (src == mem);
+    sf = (src < mem);
     
-    nib6 = nib6 - 1:2;
-    vf = (nib6 != 0:2);
-    dnib1 = dnib1 + 2:4;
+    nib6 = nib6 - 1;
+    vf = (nib6 == 0);
+    dnib1 = dnib1 + 2;
 }
 
 # CPIB: Compare and Increment
-:CPIB nib5,@dnib1,nib6,cc_jp is op8=0xBA & dnib1 & nib0=0; nib7=0 & nib6 & nib5 & eval_jp & cc_jp 
+:CPIB bnib5,@dnib1,nib6,cc_jp is op8=0xBA & dnib1 & nib0=0; nib7=0 & nib6 & bnib5 & eval_jp & cc_jp 
 {
-    local mem_byte:1 = *[ram]dnib1;
-    local src_byte:1 = nib5:1;
+    local mem:1 = *[ram]dnib1;
+    local src = bnib5;
     
-    zf = (src_byte == mem_byte);
-    sf = (src_byte < mem_byte);
+    zf = (src == mem);
+    sf = (src < mem);
     
-    nib6 = nib6 - 1:2;
-    vf = (nib6 != 0:2);
-    dnib1 = dnib1 + 1:4;
+    nib6 = nib6 - 1;
+    vf = (nib6 == 0);
+    dnib1 = dnib1 + 1;
 }
 
 # p 76
@@ -1296,60 +1296,172 @@ eval_jp: is cc_jp
 # CPIR: Compare,Increment,and Repeat
 :CPIR nib5,@dnib1,nib6,cc_jp is op8=0xBB & dnib1 & nib0=0x4; nib7=0 & nib6 & nib5 & eval_jp & cc_jp 
 {
-    <loop_start>
-    local mem_byte:1 = *[ram]dnib1;
-    local src_byte:1 = nib5:1;
+<loop_start>
+    local mem = *[ram]dnib1;
+    local src = nib5;
     
-    zf = (src_byte == mem_byte);
-    sf = (src_byte < mem_byte);
+    zf = (src == mem);
+    sf = (src < mem);
     
-    nib6 = nib6 - 1:2;
-    vf = (nib6 != 0:2);
-    dnib1 = dnib1 + 2:4;
+    nib6 = nib6 - 1;
+    vf = (nib6 == 0);
+    dnib1 = dnib1 + 2;
     
     if (vf && !zf) goto <loop_start>;
 }
 
 # CPIRB: Compare,Increment,and Repeat
-:CPIRB nib5,@dnib1,nib6,cc_jp is op8=0xBA & dnib1 & nib0=0x4; nib7=0 & nib6 & nib5 & eval_jp & cc_jp 
+:CPIRB bnib5,@dnib1,nib6,cc_jp is op8=0xBA & dnib1 & nib0=0x4; nib7=0 & nib6 & bnib5 & eval_jp & cc_jp 
 {
-    <loop_start>
-    local mem_byte:1 = *[ram]dnib1;
-    local src_byte:1 = nib5:1;
+<loop_start>
+    local mem:1 = *[ram]dnib1;
+    local src = bnib5;
     
-    zf = (src_byte == mem_byte);
-    sf = (src_byte < mem_byte);
+    zf = (src == mem);
+    sf = (src < mem);
     
-    nib6 = nib6 - 1:2;
-    vf = (nib6 != 0:2);
-    dnib1 = dnib1 + 1:4;
+    nib6 = nib6 - 1;
+    vf = (nib6 == 0);
+    dnib1 = dnib1 + 1;
     
     if (vf && !zf) goto <loop_start>;
 }
 
 # CPSD p 78
 # CPSD @r1,@r2,r,cc
-:CPSD @dnib5,@dnib1,nib6,cc_jp is op8=0xBB & dnib1 & nib0=0xA; nib7=0 & nib6 & dnib5 & eval_jp & cc_jp {}
+:CPSD @dnib5,@dnib1,nib6,nib4 is op8=0xBB & dnib1 & nib0=0xA; nib7=0 & nib6 & dnib5 & nib4
+{
+    local dst:2 = *[ram]dnib5;
+    local src:2 = *[ram]dnib1;
+
+    zf = (dst == src) && (nib4:1 == 0b0110); #EQ
+    sf = (dst < src);		
+    cf = sf;	# FIXME TO BE CHECKED FOR ALL THE CPS** INSTRUCTIONS		
+    nib6 = nib6 - 1;
+    vf = (nib6 == 0);
+    dnib1 = dnib1 - 2;
+    dnib5 = dnib5 - 2;
+}
+
 # CPSDB @r1,@r2,r,cc
-:CPSDB @dnib5,@dnib1,nib6,cc_jp is op8=0xBA & dnib1 & nib0=0xA; nib7=0 & nib6 & dnib5 & eval_jp & cc_jp {}
+:CPSDB @dnib5,@dnib1,nib6,nib4 is op8=0xBA & dnib1 & nib0=0xA; nib7=0 & nib6 & dnib5 & nib4
+{
+    local dst:1 = *[ram]dnib5;
+    local src:1 = *[ram]dnib1;
+
+    zf = (dst == src) && (nib4:1 == 0b0110); #EQ
+    sf = (dst < src);
+    cf = sf;		
+    nib6 = nib6 - 1;
+    vf = (nib6 == 0);
+    dnib1 = dnib1 - 1;
+    dnib5 = dnib5 - 1;
+}
 
 # CPSDR p 79
 # CPSDR @r1,@r2,r,cc
-:CPSDR @dnib5,@dnib1,nib6,cc_jp is op8=0xBB & dnib1 & nib0=0xE; nib7=0 & nib6 & dnib5 & eval_jp & cc_jp {}
+:CPSDR @dnib5,@dnib1,nib6,nib4 is op8=0xBB & dnib1 & nib0=0xE; nib7=0 & nib6 & dnib5 & nib4
+{
+<loop_start>
+    local dst:2 = *[ram]dnib5;
+    local src:2 = *[ram]dnib1;
+
+    zf = (dst == src) && (nib4:1 == 0b0110); #EQ
+    sf = (dst < src);
+    cf = sf;		
+    nib6 = nib6 - 1;
+    vf = (nib6 == 0);
+    dnib1 = dnib1 - 2;
+    dnib5 = dnib5 - 2;
+
+    if (vf && !zf) goto <loop_start>;
+}
+
 # CPSDRB @r1,@r2,r,cc
-:CPSDRB @dnib5,@dnib1,nib6,cc_jp is op8=0xBA & dnib1 & nib0=0xE; nib7=0 & nib6 & dnib5 & eval_jp & cc_jp {}
+:CPSDRB @dnib5,@dnib1,nib6,nib4 is op8=0xBA & dnib1 & nib0=0xE; nib7=0 & nib6 & dnib5 & nib4
+{
+<loop_start>
+    local dst:1 = *[ram]dnib5;
+    local src:1 = *[ram]dnib1;
+
+    zf = (dst == src) && (nib4:1 == 0b0110); #EQ
+    sf = (dst < src);
+    cf = sf;		
+    nib6 = nib6 - 1;
+    vf = (nib6 == 0);
+    dnib1 = dnib1 - 2;
+    dnib5 = dnib5 - 2;
+
+    if (vf && !zf) goto <loop_start>;
+}
 
 # CPSI p 81
 # CPSI @r1,@r2,r,cc
-:CPSI @dnib5,@dnib1,nib6,cc_jp is op8=0xBB & dnib1 & nib0=0x2; nib7=0 & nib6 & dnib5 & eval_jp & cc_jp {}
+:CPSI @dnib5,@dnib1,nib6,nib4 is op8=0xBB & dnib1 & nib0=0x2; nib7=0 & nib6 & dnib5 & nib4
+{
+    local dst:2 = *[ram]dnib5;
+    local src:2 = *[ram]dnib1;
+
+    zf = (dst == src) && (nib4:1 == 0b0110); #EQ
+    sf = (dst < src);
+    cf = sf;		
+    nib6 = nib6 - 1;
+    vf = (nib6 == 0);
+    dnib1 = dnib1 + 2;
+    dnib5 = dnib5 + 2;
+}
+
 # CPSIB @r1,@r2,r,cc
-:CPSIB @dnib5,@dnib1,nib6,cc_jp is op8=0xBA & dnib1 & nib0=0x2; nib7=0 & nib6 & dnib5 & eval_jp & cc_jp {}
+:CPSIB @dnib5,@dnib1,nib6,nib4 is op8=0xBA & dnib1 & nib0=0x2; nib7=0 & nib6 & dnib5 & nib4
+{
+    local dst:1 = *[ram]dnib5;
+    local src:1 = *[ram]dnib1;
+
+    zf = (dst == src) && (nib4:1 == 0b0110); #EQ
+    sf = (dst < src);
+    cf = sf;		
+    nib6 = nib6 - 1;
+    vf = (nib6 == 0);
+    dnib1 = dnib1 + 1;
+    dnib5 = dnib5 + 1;
+}
 
 # CPSIR p 83
 # CPSIR @r1,@r2,r,cc
-:CPSIR @dnib5,@dnib1,nib6,cc_jp is op8=0xBB & dnib1 & nib0=0x6; nib7=0 & nib6 & dnib5 & eval_jp & cc_jp {}
+:CPSIR @dnib5,@dnib1,nib6,nib4 is op8=0xBB & dnib1 & nib0=0x6; nib7=0 & nib6 & dnib5 & nib4
+{
+<loop_start>
+    local dst:2 = *[ram]dnib5;
+    local src:2 = *[ram]dnib1;
+
+    zf = (dst == src) && (nib4:1 == 0b0110); #EQ
+    sf = (dst < src);
+    cf = sf;		
+    nib6 = nib6 - 1;
+    vf = (nib6 == 0);
+    dnib1 = dnib1 + 2;
+    dnib5 = dnib5 + 2;
+
+    if (vf && !zf) goto <loop_start>;
+}
+
 # CPSIRB @r1,@r2,r,cc
-:CPSIRB @dnib5,@dnib1,nib6,cc_jp is op8=0xBA & dnib1 & nib0=0x6; nib7=0 & nib6 & dnib5 & eval_jp & cc_jp {}
+:CPSIRB @dnib5,@dnib1,nib6,nib4 is op8=0xBA & dnib1 & nib0=0x6; nib7=0 & nib6 & dnib5 & nib4
+{
+<loop_start>
+    local dst:1 = *[ram]dnib5;
+    local src:1 = *[ram]dnib1;
+
+    zf = (dst == src) && (nib4:1 == 0b0110); #EQ
+    sf = (dst < src);
+    cf = sf;		
+    nib6 = nib6 - 1;
+    vf = (nib6 == 0);
+    dnib1 = dnib1 + 1;
+    dnib5 = dnib5 + 1;
+
+    if (vf && !zf) goto <loop_start>;
+}
 
 # p 85
 # DAB r1
@@ -2738,9 +2850,14 @@ eval_jp: is cc_jp
 # POP p 156
 # --- registers  ---
 # POP r1,@rr2
-:POP nib0,@dnib1 is op8=0x97 & dnib1 & nib0 {}
+:POP nib0,@dnib1 is op8=0x97 & dnib1 & nib0
+{
+}
+
 # POPL rr1,@rr2
-:POPL dnib0,@dnib1 is op8=0x95 & dnib1 & dnib0 {}
+:POPL dnib0,@dnib1 is op8=0x95 & dnib1 & dnib0
+{
+}
 
 # --- indirect ---
 # POP @rr1,@rr2
@@ -3243,19 +3360,19 @@ eval_jp: is cc_jp
 # TEST r1
 :TEST nib1 is op8=0x8D & nib1 & nib0=4 
 {
-	goto inst_next;	#FIXME FUNCTION NOT IMPLEMENTED
+	set_zs_w(nib1);
 }
 
 # TESTB r1
 :TESTB bnib1 is op8=0x8C & bnib1 & nib0=4 
 {
-	goto inst_next;	#FIXME FUNCTION NOT IMPLEMENTED
+	set_zsp_b(bnib1);
 }
 
 # TESTL	rr1
 :TESTL dnib1 is op8=0x9C & dnib1 & nib0=0x8 
 {
-	goto inst_next;	#FIXME FUNCTION NOT IMPLEMENTED
+	set_zs_d(dnib1);
 }
 
 # --- indirect reg ---
@@ -3263,49 +3380,46 @@ eval_jp: is cc_jp
 :TEST @dnib1 is op8=0x0D & dnib1 & nib0=4 
 {
     local addr:4 = dnib1;
-    local mem_val:2 = *[ram]:2 addr;
-	local res:2 = mem_val;
-	goto inst_next;	#FIXME FUNCTION NOT IMPLEMENTED
+    local res:2 = *[ram]:2 addr;
+	set_zs_w(res);
 }
 
 # TESTB @r1
 :TESTB @dnib1 is op8=0x0C & dnib1 & nib0=4 
 {
     local addr:4 = dnib1;
-    local mem_val:1 = *[ram]:1 addr;
-	local res:1 = mem_val;
-	goto inst_next;	#FIXME FUNCTION NOT IMPLEMENTED
+    local res:1 = *[ram]:1 addr;
+	set_zsp_b(res);
 }
 
 # TESTL @r1
 :TESTL @dnib1 is op8=0x1C & dnib1 & nib0=0x8 
 {
     local addr:4 = dnib1;
-    local mem_val:2 = *[ram]:2 addr;
-	local res:2 = mem_val;
-	goto inst_next;	#FIXME FUNCTION NOT IMPLEMENTED
+    local res:4 = *[ram]:2 addr;
+	set_zs_d(res);
 }
 
 # --- direct address ---
 # TEST Addr32
 :TEST Addr32 is op8=0x4D & nib1=0 & nib0=4; Addr32 
 {
-    local mem_val:2 = *[ram]Addr32;
-	goto inst_next;	#FIXME FUNCTION NOT IMPLEMENTED
+    local res:2 = *[ram]Addr32;
+	set_zs_w(res);
 }
 
 # TESTB Addr32
 :TESTB Addr32 is op8=0x4C & nib1=0 & nib0=4; Addr32 
 {
-    local mem_val:1 = *[ram]Addr32;
-	goto inst_next;	#FIXME FUNCTION NOT IMPLEMENTED
+    local res:1 = *[ram]Addr32;
+	set_zsp_b(res);
 }
 
 # TESTL Addr32
 :TESTL Addr32 is op16=0x5C08; Addr32 
 {
-    local mem_val:2 = *[ram]Addr32;
-	goto inst_next;	#FIXME FUNCTION NOT IMPLEMENTED
+    local res:4 = *[ram]Addr32;
+	set_zs_d(res);
 }
 
 # --- indexed address ---
@@ -3313,24 +3427,24 @@ eval_jp: is cc_jp
 :TEST Addr32(nib1) is op8=0x4D & nib1 & nib0=4; Addr32 
 {
     local addr:4 = zext(nib1);
-    local mem_val:2 = *[ram]:2 (addr + zext(nib1));
-	goto inst_next;	#FIXME FUNCTION NOT IMPLEMENTED
+    local res:2 = *[ram]:2 (addr + zext(nib1));
+	set_zs_w(res);
 }
 
 # TESTB Addr32(rs)
 :TESTB Addr32(nib1) is op8=0x4C & nib1 & nib0=4; Addr32 
 {
     local addr:4 = zext(nib1);
-    local mem_val:1 = *[ram]:1 (addr + zext(nib1));
-	goto inst_next;	#FIXME FUNCTION NOT IMPLEMENTED
+    local res:1 = *[ram]:1 (addr + zext(nib1));
+	set_zsp_b(res);
 }
 
 # TESTL Addr32(rs)
 :TESTL Addr32(nib1) is op8=0x5C & nib1 & nib0=8; Addr32 
 {
     local addr:4 = zext(nib1);
-    local mem_val:4 = *[ram]:4 (addr + zext(nib1));
-	goto inst_next;	#FIXME FUNCTION NOT IMPLEMENTED
+    local res:4 = *[ram]:4 (addr + zext(nib1));
+	set_zs_d(res);
 }
 
 # TRDB p 195
@@ -3356,13 +3470,13 @@ eval_jp: is cc_jp
 # TSET r1
 :TSET nib1 is op8=0x8D & nib1 & nib0=0x6
 {
-	goto inst_next;	#FIXME FUNCTION NOT IMPLEMENTED
+    sf = (nib1 >= 0x8000);
 }
 
 # TSETB r1
 :TSETB bnib1 is op8=0x8C & bnib1 & nib0=0x6
 {
-	goto inst_next;	#FIXME FUNCTION NOT IMPLEMENTED
+    sf = (bnib1 >= 0x80);
 }
 
 # --- indirect reg ---
@@ -3370,33 +3484,31 @@ eval_jp: is cc_jp
 :TSET @dnib1 is op8=0x0D & dnib1 & nib0=0x6
 {
     local addr:4 = dnib1;
-    local mem_val:2 = *[ram]:2 addr;
-	local res:2 = mem_val;
-	goto inst_next;	#FIXME FUNCTION NOT IMPLEMENTED
+    local res:2 = *[ram]:2 addr;
+    sf = (res >= 0x8000);
 }
 
 # TSETB @r1
 :TSETB @dnib1 is op8=0x0C & dnib1 & nib0=0x6
 {
     local addr:4 = dnib1;
-    local mem_val:1 = *[ram]:1 addr;
-	local res:1 = mem_val;
-	goto inst_next;	#FIXME FUNCTION NOT IMPLEMENTED
+    local res:1 = *[ram]:1 addr;
+    sf = (res >= 0x80);
 }
 
 # --- direct address ---
 # TSET Addr32
 :TSET Addr32 is op8=0x4D & nib1=0 & nib0=0x6; Addr32
 {
-    local mem_val:2 = *[ram]Addr32;
-	goto inst_next;	#FIXME FUNCTION NOT IMPLEMENTED
+    local res:2 = *[ram]Addr32;
+    sf = (res >= 0x8000);
 }
 
 # TSETB Addr32
 :TSETB Addr32 is op8=0x4C & nib1=0 & nib0=0x6; Addr32
 {
-    local mem_val:1 = *[ram]Addr32;
-	goto inst_next;	#FIXME FUNCTION NOT IMPLEMENTED
+    local res:1 = *[ram]Addr32;
+    sf = (res >= 0x80);
 }
 
 # --- indexed address ---
@@ -3404,16 +3516,16 @@ eval_jp: is cc_jp
 :TSET Addr32(nib1) is op8=0x4D & nib1 & nib0=0x6; Addr32
 {
     local addr:4 = zext(nib1);
-    local mem_val:2 = *[ram]:2 (addr + zext(nib1));
-	goto inst_next;	#FIXME FUNCTION NOT IMPLEMENTED
+    local res:2 = *[ram]:2 (addr + zext(nib1));
+    sf = (res >= 0x8000);
 }
 
 # TSETB Addr32(rs)
 :TSETB Addr32(nib1) is op8=0x4C & nib1 & nib0=0x6; Addr32
 {
     local addr:4 = zext(nib1);
-    local mem_val:1 = *[ram]:1 (addr + zext(nib1));
-	goto inst_next;	#FIXME FUNCTION NOT IMPLEMENTED
+    local res:1 = *[ram]:1 (addr + zext(nib1));
+    sf = (res >= 0x80);
 }
 
 # XOR p 211
