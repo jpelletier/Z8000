@@ -166,6 +166,12 @@ attach variables [ qnib0 qnib1 ]
 ];
 
 # Attach the displacement relative calculation to a target operand
+rel16: RelAddr16 is disp16
+[
+	RelAddr16 = inst_next + disp16;
+]{ export RelAddr16; }
+
+# Attach the displacement relative calculation to a target operand
 rel12: RelAddr12 is disp12
 [
 	RelAddr12 = inst_next + disp12;
@@ -2273,23 +2279,103 @@ eval_jp: is cc_jp
 
 # LDD p 123
 # LDD @rr1,@rr2,r
-:LDD @dnib1,@dnib5,nib6  is op8=0xBB & dnib1 & nib0=0x9; nib7=0 & nib6 & dnib5 & nib4=0x8 {}
-:LDDB @dnib1,@dnib5,nib6 is op8=0xBA & dnib1 & nib0=0x9; nib7=0 & nib6 & dnib5 & nib4=0x8 {}
+:LDD @dnib1,@dnib5,nib6  is op8=0xBB & dnib1 & nib0=0x9; nib7=0 & nib6 & dnib5 & nib4=0x8
+{
+    local dest:4 = dnib1;
+    local src:4 = dnib5;
+	*[ram]:2 dest = *[ram]:2 src;
+	dnib1 = dnib1-2;
+	dnib5 = dnib5-2;
+	nib6 = nib6-1;
+	vf = (nib6 == 0);
+}
+
+:LDDB @dnib1,@dnib5,nib6 is op8=0xBA & dnib1 & nib0=0x9; nib7=0 & nib6 & dnib5 & nib4=0x8
+{
+    local dest:4 = dnib1;
+    local src:4 = dnib5;
+	*[ram]:1 dest = *[ram]:1 src;
+	dnib1 = dnib1-1;
+	dnib5 = dnib5-1;
+	nib6 = nib6-1;
+	vf = (nib6 == 0);
+}
 
 # LDDR p 124
 # LDDR @rr1,@rr2,r
-:LDDR @dnib1,@dnib5,nib6  is op8=0xBB & dnib1 & nib0=0x9; nib7=0 & nib6 & dnib5 & nib4=0 {}
-:LDDRB @dnib1,@dnib5,nib6 is op8=0xBA & dnib1 & nib0=0x9; nib7=0 & nib6 & dnib5 & nib4=0 {}
+:LDDR @dnib1,@dnib5,nib6  is op8=0xBB & dnib1 & nib0=0x9; nib7=0 & nib6 & dnib5 & nib4=0
+{
+    local dest:4 = dnib1;
+    local src:4 = dnib5;
+	*[ram]:2 dest = *[ram]:2 src;
+	dnib1 = dnib1-2;
+	dnib5 = dnib5-2;
+	nib6 = nib6-1;
+	if (nib6 != 0) goto inst_start;
+	vf = 1;
+}
+
+:LDDRB @dnib1,@dnib5,nib6 is op8=0xBA & dnib1 & nib0=0x9; nib7=0 & nib6 & dnib5 & nib4=0
+{
+    local dest:4 = dnib1;
+    local src:4 = dnib5;
+	*[ram]:1 dest = *[ram]:1 src;
+	dnib1 = dnib1-1;
+	dnib5 = dnib5-1;
+	nib6 = nib6-1;
+	if (nib6 != 0) goto inst_start;
+	vf = 1;
+}
 
 # LDI p 126
 # LDI @rr1,@rr2,r
-:LDI @dnib1,@dnib5,nib6  is op8=0xBB & dnib1 & nib0=0x1; nib7=0 & nib6 & dnib5 & nib4=0x8 {}
-:LDIB @dnib1,@dnib5,nib6 is op8=0xBA & dnib1 & nib0=0x1; nib7=0 & nib6 & dnib5 & nib4=0x8 {}
+:LDI @dnib1,@dnib5,nib6  is op8=0xBB & dnib1 & nib0=0x1; nib7=0 & nib6 & dnib5 & nib4=0x8
+{
+    local dest:4 = dnib1;
+    local src:4 = dnib5;
+	*[ram]:2 dest = *[ram]:2 src;
+	dnib1 = dnib1+2;
+	dnib5 = dnib5+2;
+	nib6 = nib6-1;
+	vf = (nib6 == 0);
+}
+
+:LDIB @dnib1,@dnib5,nib6 is op8=0xBA & dnib1 & nib0=0x1; nib7=0 & nib6 & dnib5 & nib4=0x8
+{
+    local dest:4 = dnib1;
+    local src:4 = dnib5;
+	*[ram]:1 dest = *[ram]:1 src;
+	dnib1 = dnib1+1;
+	dnib5 = dnib5+1;
+	nib6 = nib6-1;
+	vf = (nib6 == 0);
+}
 
 # LDIR p 127
 # LDIR @rr1,@rr2,r
-:LDIR @dnib1,@dnib5,nib6  is op8=0xBB & dnib1 & nib0=0x1; nib7=0 & nib6 & dnib5 & nib4=0 {}
-:LDIRB @dnib1,@dnib5,nib6 is op8=0xBA & dnib1 & nib0=0x1; nib7=0 & nib6 & dnib5 & nib4=0 {}
+:LDIR @dnib1,@dnib5,nib6  is op8=0xBB & dnib1 & nib0=0x1; nib7=0 & nib6 & dnib5 & nib4=0
+{
+    local dest:4 = dnib1;
+    local src:4 = dnib5;
+	*[ram]:2 dest = *[ram]:2 src;
+	dnib1 = dnib1+2;
+	dnib5 = dnib5+2;
+	nib6 = nib6-1;
+	if (nib6 != 0) goto inst_start;
+	vf = 1;
+}
+
+:LDIRB @dnib1,@dnib5,nib6 is op8=0xBA & dnib1 & nib0=0x1; nib7=0 & nib6 & dnib5 & nib4=0
+{
+    local dest:4 = dnib1;
+    local src:4 = dnib5;
+	*[ram]:1 dest = *[ram]:1 src;
+	dnib1 = dnib1+1;
+	dnib5 = dnib5+1;
+	nib6 = nib6-1;
+	if (nib6 != 0) goto inst_start;
+	vf = 1;
+}
 
 # LDK p 129
 # LDK r1,1data
@@ -2299,7 +2385,16 @@ eval_jp: is cc_jp
 # FIXME ASSEMBLER #7 DISASSEMBLER #6
 # --- indirect ---
 # LDM r1,@r2,#n
-:LDM nib6,dnib1,#value0 is op8=0x1C & dnib1 & nib0=0x1; nib7=0 & nib6 &nib5=0 & value0 { }
+:LDM nib6,dnib1,#value0 is op8=0x1C & dnib1 & nib0=0x1; nib7=0 & nib6 &nib5=0 & value0
+{
+#	local nb:1 = value0:1+1;
+#<ldm_loop>
+#	nib6 = *[ram]:2 dnib1;		
+	# FIXME how to increment register number (nib6 = R0 to R15), not its content
+#	dnib1 = dnib1+1;
+#	nb = nb-1;
+#	if (nb != 0) goto <ldm_loop>;
+}
 
 # --- direct address ---
 # LDM r1,address,#n
@@ -2324,7 +2419,13 @@ eval_jp: is cc_jp
 # LDPS p 133
 # --- indirect ---
 # LDPS @rr1
-:LDPS dnib1 is op8=0x39 & dnib1 & nib0=0 { }
+:LDPS dnib1 is op8=0x39 & dnib1 & nib0=0
+{
+#    local src = dnib1;
+	# FIXME verify if PC and FSW are loaded correcly
+#	pc = *[ram]src;
+#	FSW = *[ram](src+2);
+}
 
 # --- direct address ---
 # LDPS Addr32
@@ -2335,13 +2436,43 @@ eval_jp: is cc_jp
 :LDPS Addr32(nib1) is op8=0x79 & nib1 & nib0=0; Addr32 {}
 
 # LDR p 134
-:LDR nib0, disp16   is op8=0x31 & nib1=0 & nib0; disp16 {}
-:LDRB bnib0, disp16 is op8=0x30 & nib1=0 & bnib0; disp16 {}
-:LDRL dnib0, disp16 is op8=0x35 & nib1=0 & dnib0; disp16 {}
-:LDR disp16,nib0    is op8=0x33 & nib1=0 & nib0; disp16 {}
-:LDRB disp16,bnib0  is op8=0x32 & nib1=0 & bnib0; disp16 {}
-:LDRL disp16,dnib0  is op8=0x37 & nib1=0 & dnib0; disp16 {}
+:LDR nib0, rel16   is op8=0x31 & nib1=0 & nib0; rel16
+{
+	local addr:4 = rel16;
+	nib0 = *[ram]addr;
+}
 
+:LDRB bnib0, rel16 is op8=0x30 & nib1=0 & bnib0; rel16
+{
+	local addr:4 = rel16;
+	bnib0 = *[ram]addr;
+}
+:LDRL dnib0, rel16 is op8=0x35 & nib1=0 & dnib0; rel16
+{
+	local addr:4 = rel16;
+	dnib0 = *[ram]addr;
+}
+
+:LDR rel16,nib0    is op8=0x33 & nib1=0 & nib0; rel16
+{
+	local addr:4 = rel16;
+	*[ram]addr = nib0;
+}
+
+:LDRB rel16,bnib0  is op8=0x32 & nib1=0 & bnib0; rel16
+{
+	local addr:4 = rel16;
+	*[ram]addr = bnib0;
+}
+
+:LDRL rel16,dnib0  is op8=0x37 & nib1=0 & dnib0; rel16
+{
+	local addr:4 = rel16;
+	*[ram]addr = dnib0;
+}
+
+# ---------------------------------------------------------
+# FIXME Not used for a single Z8001 in the system
 # MBIT p 136
 :MBIT is op16=0x7B0A {}
 # MREQ p 137
@@ -2350,7 +2481,6 @@ eval_jp: is cc_jp
 :MRES is op16=0x7B09 {}
 # MSET p 140
 :MSET is op16=0x7B08 {}
-
 # ---------------------------------------------------------
 # MULT p 141
 # --- registers  ---
@@ -2394,12 +2524,16 @@ eval_jp: is cc_jp
 :NEG nib1 is op8=0x8D & nib1 & nib0=2 
 {
     nib1 = -nib1;
+	set_zs_w(nib1);
+	vf = (nib1 == 0x8000);
 }
 
 # NEGB r1
 :NEGB bnib1 is op8=0x8C & bnib1 & nib0=2 
 {
     bnib1 = -bnib1;
+	set_zs_b(bnib1);
+	vf = (bnib1 == 0x80);
 }
 
 # --- indirect reg ---
@@ -2410,6 +2544,8 @@ eval_jp: is cc_jp
     local op1:2 = *[ram]:2 addr;
 	local res:2 = -op1;
     dnib1 = zext(res);
+	set_zs_w(res);
+	vf = (res == 0x8000);
 }
 
 # NEGB @r1
@@ -2419,6 +2555,8 @@ eval_jp: is cc_jp
     local op1:1 = *[ram]:1 addr;
 	local res:1 = -op1;
     dnib1 = zext(res);
+	set_zs_b(res);
+	vf = (res == 0x80);
 }
 
 # --- direct address ---
@@ -2426,14 +2564,20 @@ eval_jp: is cc_jp
 :NEG Addr32 is op8=0x4D & nib1=0 & nib0=2; Addr32 
 {
     local op1:2 = *[ram]Addr32;
-	*[ram]Addr32 = -op1;
+	local res:2 = -op1;
+	*[ram]Addr32 = res;
+	set_zs_w(res);
+	vf = (res == 0x8000);
 }
 
 # NEGB Addr32
 :NEGB Addr32 is op8=0x4C & nib1=0 & nib0=2; Addr32 
 {
     local op1:1 = *[ram]Addr32;
-	*[ram]Addr32 = -op1;
+	local res:1 = -op1;
+	*[ram]Addr32 = res;
+	set_zs_b(res);
+	vf = (res == 0x80);
 }
 
 # --- indexed address ---
@@ -2442,8 +2586,10 @@ eval_jp: is cc_jp
 {
     local addr:4 = zext(nib1);
     local op1:2 = *[ram]:2 (addr + zext(nib1));
-
-    *[ram]:2 (addr + zext(nib1)) = -op1;
+	local res:2 = -op1;
+    *[ram]:2 (addr + zext(nib1)) = res;
+	set_zs_w(res);
+	vf = (res == 0x8000);
 }
 
 # NEGB Addr32(rs)
@@ -2451,8 +2597,10 @@ eval_jp: is cc_jp
 {
     local addr:4 = zext(nib1);
     local op1:1 = *[ram]:1 (addr + zext(nib1));
-
-    *[ram]:1 (addr + zext(nib1)) = -op1;
+	local res:1 = -op1;
+    *[ram]:1 (addr + zext(nib1)) = res;
+	set_zs_b(res);
+	vf = (res == 0x80);
 }
 
 # --- No Operation (NOP) ---
