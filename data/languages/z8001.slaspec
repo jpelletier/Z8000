@@ -1243,7 +1243,6 @@ eval_jp: is cc_jp
 # CPDR: Compare,Decrement,and Repeat
 :CPDR nib5,@dnib1,nib6,cc_jp is op8=0xBB & dnib1 & nib0=0xC; nib7=0 & nib6 & nib5 & eval_jp & cc_jp  
 {
-<loop_start>
     local dst = nib5;
     local src = *[ram]dnib1;
 
@@ -1252,13 +1251,12 @@ eval_jp: is cc_jp
     vf = (nib6 == 0);
     dnib1 = dnib1 - 2;
     
-    if (vf && !zf) goto <loop_start>;
+    if (vf && !zf) goto inst_start;
 }
 
 # CPDRB: Compare,Decrement,and Repeat
 :CPDRB bnib5,@dnib1,nib6,cc_jp is op8=0xBA & dnib1 & nib0=0xC; nib7=0 & nib6 & bnib5 & eval_jp & cc_jp  
 {
-<loop_start>
     local dst:1 = *[ram]dnib1;
     local src = bnib5;
     
@@ -1267,7 +1265,7 @@ eval_jp: is cc_jp
     vf = (nib6 == 0);
     dnib1 = dnib1 - 1;
     
-    if (vf && !zf) goto <loop_start>;
+    if (vf && !zf) goto inst_start;
 }
 
 # p 74
@@ -1304,7 +1302,6 @@ eval_jp: is cc_jp
 # CPIR: Compare,Increment,and Repeat
 :CPIR nib5,@dnib1,nib6,cc_jp is op8=0xBB & dnib1 & nib0=0x4; nib7=0 & nib6 & nib5 & eval_jp & cc_jp 
 {
-<loop_start>
     local dst = *[ram]dnib1;
     local src = nib5;
     
@@ -1313,13 +1310,12 @@ eval_jp: is cc_jp
     vf = (nib6 == 0);
     dnib1 = dnib1 + 2;
     
-    if (vf && !zf) goto <loop_start>;
+    if (vf && !zf) goto inst_start;
 }
 
 # CPIRB: Compare,Increment,and Repeat
 :CPIRB bnib5,@dnib1,nib6,cc_jp is op8=0xBA & dnib1 & nib0=0x4; nib7=0 & nib6 & bnib5 & eval_jp & cc_jp 
 {
-<loop_start>
     local dst:1 = *[ram]dnib1;
     local src = bnib5;
     
@@ -1328,7 +1324,7 @@ eval_jp: is cc_jp
     vf = (nib6 == 0);
     dnib1 = dnib1 + 1;
     
-    if (vf && !zf) goto <loop_start>;
+    if (vf && !zf) goto inst_start;
 }
 
 # CPSD p 78
@@ -1366,7 +1362,6 @@ eval_jp: is cc_jp
 # CPSDR @r1,@r2,r,cc
 :CPSDR @dnib5,@dnib1,nib6,nib4 is op8=0xBB & dnib1 & nib0=0xE; nib7=0 & nib6 & dnib5 & nib4
 {
-<loop_start>
     local dst:2 = *[ram]dnib5;
     local src:2 = *[ram]dnib1;
 
@@ -1378,13 +1373,12 @@ eval_jp: is cc_jp
     dnib1 = dnib1 - 2;
     dnib5 = dnib5 - 2;
 
-    if (vf && !zf) goto <loop_start>;
+    if (vf && !zf) goto inst_start;
 }
 
 # CPSDRB @r1,@r2,r,cc
 :CPSDRB @dnib5,@dnib1,nib6,nib4 is op8=0xBA & dnib1 & nib0=0xE; nib7=0 & nib6 & dnib5 & nib4
 {
-<loop_start>
     local dst:1 = *[ram]dnib5;
     local src:1 = *[ram]dnib1;
 
@@ -1396,7 +1390,7 @@ eval_jp: is cc_jp
     dnib1 = dnib1 - 2;
     dnib5 = dnib5 - 2;
 
-    if (vf && !zf) goto <loop_start>;
+    if (vf && !zf) goto inst_start;
 }
 
 # CPSI p 81
@@ -1434,7 +1428,6 @@ eval_jp: is cc_jp
 # CPSIR @r1,@r2,r,cc
 :CPSIR @dnib5,@dnib1,nib6,nib4 is op8=0xBB & dnib1 & nib0=0x6; nib7=0 & nib6 & dnib5 & nib4
 {
-<loop_start>
     local dst:2 = *[ram]dnib5;
     local src:2 = *[ram]dnib1;
 
@@ -1446,13 +1439,12 @@ eval_jp: is cc_jp
     dnib1 = dnib1 + 2;
     dnib5 = dnib5 + 2;
 
-    if (vf && !zf) goto <loop_start>;
+    if (vf && !zf) goto inst_start;
 }
 
 # CPSIRB @r1,@r2,r,cc
 :CPSIRB @dnib5,@dnib1,nib6,nib4 is op8=0xBA & dnib1 & nib0=0x6; nib7=0 & nib6 & dnib5 & nib4
 {
-<loop_start>
     local dst:1 = *[ram]dnib5;
     local src:1 = *[ram]dnib1;
 
@@ -1464,7 +1456,7 @@ eval_jp: is cc_jp
     dnib1 = dnib1 + 1;
     dnib5 = dnib5 + 1;
 
-    if (vf && !zf) goto <loop_start>;
+    if (vf && !zf) goto inst_start;
 }
 
 # p 85
@@ -1894,69 +1886,189 @@ eval_jp: is cc_jp
 # IND/SIND p 99
 :IND @dnib5,@nib1,nib6 is op8=0x3B & nib1 & nib0=0; nib7=0 & nib6 & dnib5 & nib4=0x8 
 {
+    local dst:4 = dnib5;
+    local src:2 = nib1;
+
+	IoRead(src,*[ram]:2 dst);
+	dnib5 = dnib5-2;
+	nib6 = nib6-1;
+	vf = (nib6 == 0);
 }
 
-:INDB @nib5,@nib1,nib6 is op8=0x3A & nib1 & nib0=0; nib7=0 & nib6 & nib5 & nib4=0x8 
+:INDB @dnib5,@nib1,nib6 is op8=0x3A & nib1 & nib0=0; nib7=0 & nib6 & dnib5 & nib4=0x8 
 {
+    local dst:4 = dnib5;
+    local src:2 = nib1;
+
+	IoRead(src,*[ram]:1 dst);
+	dnib5 = dnib5+1;
+	nib6 = nib6-1;
+	vf = (nib6 == 0);
 }
 
-:SIND @nib5,@nib1,nib6 is op8=0x3B & nib1 & nib0=1; nib7=0 & nib6 & nib5 & nib4=0x8 
+:SIND @dnib5,@nib1,nib6 is op8=0x3B & nib1 & nib0=1; nib7=0 & nib6 & dnib5 & nib4=0x8 
 {
+    local dst:4 = dnib5;
+    local src:2 = nib1;
+
+	IoRead(src,*[ram]:2 dst);
+	dnib5 = dnib5-2;
+	nib6 = nib6-1;
+	vf = (nib6 == 0);
 }
 
-:SINDB @nib5,@nib1,nib6 is op8=0x3A & nib1 & nib0=1; nib7=0 & nib6 & nib5 & nib4=0x8 
+:SINDB @dnib5,@nib1,nib6 is op8=0x3A & nib1 & nib0=1; nib7=0 & nib6 & dnib5 & nib4=0x8 
 {
+    local dst:4 = dnib5;
+    local src:2 = nib1;
+
+	IoRead(src,*[ram]:1 dst);
+	dnib5 = dnib5+1;
+	nib6 = nib6-1;
+	vf = (nib6 == 0);
 }
 
 # INDR/SINDR p 100
-:INDR @nib5,@nib1,nib6 is op8=0x3B & nib1 & nib0=0x8; nib7=0 & nib6 & nib5 & nib4=0 
+:INDR @dnib5,@nib1,nib6 is op8=0x3B & nib1 & nib0=0x8; nib7=0 & nib6 & dnib5 & nib4=0 
 {
+    local dst:4 = dnib5;
+    local src:2 = nib1;
+
+	IoRead(src,*[ram]:2 dst);
+	dnib5 = dnib5-2;
+	nib6 = nib6-1;
+	vf = (nib6 == 0);
+    if (!vf) goto inst_start;
 }
 
-:INDRB @nib5,@nib1,nib6 is op8=0x3A & nib1 & nib0=0x8; nib7=0 & nib6 & nib5 & nib4=0 
+:INDRB @dnib5,@nib1,nib6 is op8=0x3A & nib1 & nib0=0x8; nib7=0 & nib6 & dnib5 & nib4=0 
 {
+    local dst:4 = dnib5;
+    local src:2 = nib1;
+
+	IoRead(src,*[ram]:1 dst);
+	dnib5 = dnib5-1;
+	nib6 = nib6-1;
+	vf = (nib6 == 0);
+    if (!vf) goto inst_start;
 }
 
-:SINDR @nib5,@nib1,nib6 is op8=0x3B & nib1 & nib0=0x9; nib7=0 & nib6 & nib5 & nib4=0 
+:SINDR @dnib5,@nib1,nib6 is op8=0x3B & nib1 & nib0=0x9; nib7=0 & nib6 & dnib5 & nib4=0 
 {
+    local dst:4 = dnib5;
+    local src:2 = nib1;
+
+	IoRead(src,*[ram]:2 dst);
+	dnib5 = dnib5-2;
+	nib6 = nib6-1;
+	vf = (nib6 == 0);
+    if (!vf) goto inst_start;
 }
 
-:SINDRB @nib5,@nib1,nib6 is op8=0x3A & nib1 & nib0=0x9; nib7=0 & nib6 & nib5 & nib4=0 
+:SINDRB @dnib5,@nib1,nib6 is op8=0x3A & nib1 & nib0=0x9; nib7=0 & nib6 & dnib5 & nib4=0 
 {
+    local dst:4 = dnib5;
+    local src:2 = nib1;
+
+	IoRead(src,*[ram]:1 dst);
+	dnib5 = dnib5-1;
+	nib6 = nib6-1;
+	vf = (nib6 == 0);
+    if (!vf) goto inst_start;
 }
 
 # INI/SINI p 102
-:INI @nib5,@nib1,nib6 is op8=0x3B & nib1 & nib0=0x8; nib7=0 & nib6 & nib5 & nib4=0x8 
+:INI @dnib5,@nib1,nib6 is op8=0x3B & nib1 & nib0=0x8; nib7=0 & nib6 & dnib5 & nib4=0x8 
 {
+    local dst:4 = dnib5;
+    local src:2 = nib1;
+
+	IoRead(src,*[ram]:2 dst);
+	dnib5 = dnib5+2;
+	nib6 = nib6-1;
+	vf = (nib6 == 0);
 }
 
-:INIB @nib5,@nib1,nib6 is op8=0x3A & nib1 & nib0=0x8; nib7=0 & nib6 & nib5 & nib4=0x8 
+:INIB @dnib5,@nib1,nib6 is op8=0x3A & nib1 & nib0=0x8; nib7=0 & nib6 & dnib5 & nib4=0x8 
 {
+    local dst:4 = dnib5;
+    local src:2 = nib1;
+
+	IoRead(src,*[ram]:1 dst);
+	dnib5 = dnib5+1;
+	nib6 = nib6-1;
+	vf = (nib6 == 0);
 }
 
-:SINI @nib5,@nib1,nib6 is op8=0x3B & nib1 & nib0=0x9; nib7=0 & nib6 & nib5 & nib4=0x8 
+:SINI @dnib5,@nib1,nib6 is op8=0x3B & nib1 & nib0=0x9; nib7=0 & nib6 & dnib5 & nib4=0x8 
 {
+    local dst:4 = dnib5;
+    local src:2 = nib1;
+
+	IoRead(src,*[ram]:2 dst);
+	dnib5 = dnib5+2;
+	nib6 = nib6-1;
+	vf = (nib6 == 0);
 }
 
-:SINIB @nib5,@nib1,nib6 is op8=0x3A & nib1 & nib0=0x9; nib7=0 & nib6 & nib5 & nib4=0x8 
+:SINIB @dnib5,@nib1,nib6 is op8=0x3A & nib1 & nib0=0x9; nib7=0 & nib6 & dnib5 & nib4=0x8 
 {
+    local dst:4 = dnib5;
+    local src:2 = nib1;
+
+	IoRead(src,*[ram]:1 dst);
+	dnib5 = dnib5+1;
+	nib6 = nib6-1;
+	vf = (nib6 == 0);
 }
 
 # INIR/SINIR p 103
-:INIR @nib5,@nib1,nib6 is op8=0x3B & nib1 & nib0=0; nib7=0 & nib6 & nib5 & nib4=0 
+:INIR @dnib5,@nib1,nib6 is op8=0x3B & nib1 & nib0=0; nib7=0 & nib6 & dnib5 & nib4=0 
 {
+    local dst:4 = dnib5;
+    local src:2 = nib1;
+
+	IoRead(src,*[ram]:2 dst);
+	dnib5 = dnib5+2;
+	nib6 = nib6-1;
+	vf = (nib6 == 0);
+    if (!vf) goto inst_start;
 }
 
-:INIRB @nib5,@nib1,nib6 is op8=0x3A & nib1 & nib0=0; nib7=0 & nib6 & nib5 & nib4=0 
+:INIRB @dnib5,@nib1,nib6 is op8=0x3A & nib1 & nib0=0; nib7=0 & nib6 & dnib5 & nib4=0 
 {
+    local dst:4 = dnib5;
+    local src:2 = nib1;
+
+	IoRead(src,*[ram]:1 dst);
+	dnib5 = dnib5+1;
+	nib6 = nib6-1;
+	vf = (nib6 == 0);
+    if (!vf) goto inst_start;
 }
 
-:SINIR @nib5,@nib1,nib6 is op8=0x3B & nib1 & nib0=1; nib7=0 & nib6 & nib5 & nib4=0 
+:SINIR @dnib5,@nib1,nib6 is op8=0x3B & nib1 & nib0=1; nib7=0 & nib6 & dnib5 & nib4=0 
 {
+    local dst:4 = dnib5;
+    local src:2 = nib1;
+
+	IoRead(src,*[ram]:2 dst);
+	dnib5 = dnib5+2;
+	nib6 = nib6-1;
+	vf = (nib6 == 0);
+    if (!vf) goto inst_start;
 }
 
-:SINIRB @nib5,@nib1,nib6 is op8=0x3A & nib1 & nib0=1; nib7=0 & nib6 & nib5 & nib4=0 
+:SINIRB @dnib5,@nib1,nib6 is op8=0x3A & nib1 & nib0=1; nib7=0 & nib6 & dnib5 & nib4=0 
 {
+    local dst:4 = dnib5;
+    local src:2 = nib1;
+
+	IoRead(src,*[ram]:1 dst);
+	dnib5 = dnib5+1;
+	nib6 = nib6-1;
+	vf = (nib6 == 0);
+    if (!vf) goto inst_start;
 }
 
 # --- Interrupt Return (IRET) ---
@@ -2367,11 +2479,6 @@ eval_jp: is cc_jp
     dnib0 = tmp_data;
 }
 
-#attach names [ ctlr ] 
-#[
-#	_ _ "FCW" "REFRESH" "PSAPSEG" "PSAPOFF" "NSPSEG" "NSPOFF"
-#];
-
 # LDCTL p 116
 :LDCTL "FCW",nib1 	   is op8=0x7D & nib1 & dirr=1 & ctlr=0x2 { FCW = nib1 & 0xF8FC; }
 :LDCTL "REFRESH",nib1 is op8=0x7D & nib1 & dirr=1 & ctlr=0x3 { REFRESH = nib1 & 0xFFFE; }
@@ -2507,6 +2614,7 @@ eval_jp: is cc_jp
 
 # LDM p 130
 # FIXME ASSEMBLER #7 DISASSEMBLER #6
+# FIXME how to increment register number (nib6 = R0 to R15), not its content
 # --- indirect ---
 # LDM r1,@r2,#n
 :LDM nib6,dnib1,#value0 is op8=0x1C & dnib1 & nib0=0x1; nib7=0 & nib6 &nib5=0 & value0
@@ -2514,7 +2622,6 @@ eval_jp: is cc_jp
 #	local nb:1 = value0:1+1;
 #<ldm_loop>
 #	nib6 = *[ram]:2 dnib1;		
-	# FIXME how to increment register number (nib6 = R0 to R15), not its content
 #	dnib1 = dnib1+1;
 #	nb = nb-1;
 #	if (nb != 0) goto <ldm_loop>;
@@ -2596,7 +2703,9 @@ eval_jp: is cc_jp
 }
 
 # ---------------------------------------------------------
-# FIXME Not used for a single Z8001 in the system
+# FIXME:
+# Not used for a single Z8001 in the system
+# How to implement /MI and /MO
 # MBIT p 136
 :MBIT is op16=0x7B0A {}
 # MREQ p 137
@@ -2822,17 +2931,103 @@ eval_jp: is cc_jp
 
 # OTDR/SOTDR p 148
 # OTDR @r1,@rr2,r
-:OTDR @nib5,@dnib1,nib6 is op8=0x3B & dnib1 & nib0=0xA; nib7=0 & nib6 & nib5 & nib4=0 {}
-:OTDRB @nib5,@dnib1,nib6 is op8=0x3A & dnib1 & nib0=0xA; nib7=0 & nib6 & nib5 & nib4=0 {}
-:SOTDR @nib5,@dnib1,nib6 is op8=0x3B & dnib1 & nib0=0xB; nib7=0 & nib6 & nib5 & nib4=0 {}
-:SOTDRB @nib5,@dnib1,nib6 is op8=0x3A & dnib1 & nib0=0xB; nib7=0 & nib6 & nib5 & nib4=0 {}
+:OTDR @nib5,@dnib1,nib6 is op8=0x3B & dnib1 & nib0=0xA; nib7=0 & nib6 & nib5 & nib4=0
+{
+    local dst:2 = nib5;
+    local src:4 = dnib1;
+
+	IoWrite(dst,*[ram]:2 src);
+	dnib1 = dnib1-2;
+	nib6 = nib6-1;
+	vf = (nib6 == 0);
+    if (!vf) goto inst_start;
+}
+
+:OTDRB @nib5,@dnib1,nib6 is op8=0x3A & dnib1 & nib0=0xA; nib7=0 & nib6 & nib5 & nib4=0
+{
+    local dst:2 = nib5;
+    local src:4 = dnib1;
+
+	IoWrite(dst,*[ram]:1 src);
+	dnib1 = dnib1-1;
+	nib6 = nib6-1;
+	vf = (nib6 == 0);
+    if (!vf) goto inst_start;
+}
+
+:SOTDR @nib5,@dnib1,nib6 is op8=0x3B & dnib1 & nib0=0xB; nib7=0 & nib6 & nib5 & nib4=0
+{
+    local dst:2 = nib5;
+    local src:4 = dnib1;
+
+	IoWrite(dst,*[ram]:2 src);
+	dnib1 = dnib1-2;
+	nib6 = nib6-1;
+	vf = (nib6 == 0);
+    if (!vf) goto inst_start;
+}
+
+:SOTDRB @nib5,@dnib1,nib6 is op8=0x3A & dnib1 & nib0=0xB; nib7=0 & nib6 & nib5 & nib4=0
+{
+    local dst:2 = nib5;
+    local src:4 = dnib1;
+
+	IoWrite(dst,*[ram]:1 src);
+	dnib1 = dnib1-1;
+	nib6 = nib6-1;
+	vf = (nib6 == 0);
+    if (!vf) goto inst_start;
+}
 
 # OTIR/SOTIR p 150
 # OTIR @r1,@rr2,r
-:OTIR @nib5,@dnib1,nib6 is op8=0x3B & dnib1 & nib0=0x2; nib7=0 & nib6 & nib5 & nib4=0 {}
-:OTIRB @nib5,@dnib1,nib6 is op8=0x3A & dnib1 & nib0=0x2; nib7=0 & nib6 & nib5 & nib4=0 {}
-:SOTIR @nib5,@dnib1,nib6 is op8=0x3B & dnib1 & nib0=0x3; nib7=0 & nib6 & nib5 & nib4=0 {}
-:SOTIRB @nib5,@dnib1,nib6 is op8=0x3A & dnib1 & nib0=0x3; nib7=0 & nib6 & nib5 & nib4=0 {}
+:OTIR @nib5,@dnib1,nib6 is op8=0x3B & dnib1 & nib0=0x2; nib7=0 & nib6 & nib5 & nib4=0
+{
+    local dst:2 = nib5;
+    local src:4 = dnib1;
+
+	IoWrite(dst,*[ram]:2 src);
+	dnib1 = dnib1+2;
+	nib6 = nib6-1;
+	vf = (nib6 == 0);
+    if (!vf) goto inst_start;
+}
+
+:OTIRB @nib5,@dnib1,nib6 is op8=0x3A & dnib1 & nib0=0x2; nib7=0 & nib6 & nib5 & nib4=0
+{
+    local dst:2 = nib5;
+    local src:4 = dnib1;
+
+	IoWrite(dst,*[ram]:1 src);
+	dnib1 = dnib1+1;
+	nib6 = nib6-1;
+	vf = (nib6 == 0);
+    if (!vf) goto inst_start;
+}
+
+:SOTIR @nib5,@dnib1,nib6 is op8=0x3B & dnib1 & nib0=0x3; nib7=0 & nib6 & nib5 & nib4=0
+{
+    local dst:2 = nib5;
+    local src:4 = dnib1;
+
+	IoWrite(dst,*[ram]:2 src);
+	dnib1 = dnib1+2;
+	nib6 = nib6-1;
+	vf = (nib6 == 0);
+    if (!vf) goto inst_start;
+}
+
+:SOTIRB @nib5,@dnib1,nib6 is op8=0x3A & dnib1 & nib0=0x3; nib7=0 & nib6 & nib5 & nib4=0
+{
+    local dst:2 = nib5;
+    local src:4 = dnib1;
+
+	IoWrite(dst,*[ram]:1 src);
+	dnib1 = dnib1+1;
+	nib6 = nib6-1;
+	vf = (nib6 == 0);
+    if (!vf) goto inst_start;
+}
 
 # OUT/SOUT p 152
 # --- indirect ---
@@ -2872,16 +3067,94 @@ eval_jp: is cc_jp
 
 # OUTD/SOUTD p 153
 # OUTD @r1,@rr2,r
-:OUTD @nib5,@dnib1,nib6 is op8=0x3B & dnib1 & nib0=0xA; nib7=0 & nib6 & nib5 & nib4=0x8 {}
-:OUTDB @nib5,@dnib1,nib6 is op8=0x3A & dnib1 & nib0=0xA; nib7=0 & nib6 & nib5 & nib4=0x8 {}
-:SOUTD @nib5,@dnib1,nib6 is op8=0x3B & dnib1 & nib0=0xB; nib7=0 & nib6 & nib5 & nib4=0x8 {}
-:SOUTDB @nib5,@dnib1,nib6 is op8=0x3A & dnib1 & nib0=0xB; nib7=0 & nib6 & nib5 & nib4=0x8 {}
+:OUTD @nib5,@dnib1,nib6 is op8=0x3B & dnib1 & nib0=0xA; nib7=0 & nib6 & nib5 & nib4=0x8
+{
+    local dst:2 = nib5;
+    local src:4 = dnib1;
+
+	IoWrite(dst,*[ram]:2 src);
+	dnib1 = dnib1-2;
+	nib6 = nib6-1;
+	vf = (nib6 == 0);
+}
+
+:OUTDB @nib5,@dnib1,nib6 is op8=0x3A & dnib1 & nib0=0xA; nib7=0 & nib6 & nib5 & nib4=0x8
+{
+    local dst:2 = nib5;
+    local src:4 = dnib1;
+
+	IoWrite(dst,*[ram]:1 src);
+	dnib1 = dnib1-1;
+	nib6 = nib6-1;
+	vf = (nib6 == 0);
+}
+
+:SOUTD @nib5,@dnib1,nib6 is op8=0x3B & dnib1 & nib0=0xB; nib7=0 & nib6 & nib5 & nib4=0x8
+{
+    local dst:2 = nib5;
+    local src:4 = dnib1;
+
+	IoWrite(dst,*[ram]:2 src);
+	dnib1 = dnib1-2;
+	nib6 = nib6-1;
+	vf = (nib6 == 0);
+}
+
+:SOUTDB @nib5,@dnib1,nib6 is op8=0x3A & dnib1 & nib0=0xB; nib7=0 & nib6 & nib5 & nib4=0x8
+{
+    local dst:2 = nib5;
+    local src:4 = dnib1;
+
+	IoWrite(dst,*[ram]:1 src);
+	dnib1 = dnib1-1;
+	nib6 = nib6-1;
+	vf = (nib6 == 0);
+}
 
 # OUTI @r1,@rr2,r
-:OUTI @nib5,@dnib1,nib6 is op8=0x3B & dnib1 & nib0=0x2; nib7=0 & nib6 & nib5 & nib4=0x8 {}
-:OUTIB @nib5,@dnib1,nib6 is op8=0x3A & dnib1 & nib0=0x2; nib7=0 & nib6 & nib5 & nib4=0x8 {}
-:SOUTI @nib5,@dnib1,nib6 is op8=0x3B & dnib1 & nib0=0x3; nib7=0 & nib6 & nib5 & nib4=0x8 {}
-:SOUTIB @nib5,@dnib1,nib6 is op8=0x3A & dnib1 & nib0=0x3; nib7=0 & nib6 & nib5 & nib4=0x8 {}
+:OUTI @nib5,@dnib1,nib6 is op8=0x3B & dnib1 & nib0=0x2; nib7=0 & nib6 & nib5 & nib4=0x8
+{
+    local dst:2 = nib5;
+    local src:4 = dnib1;
+
+	IoWrite(dst,*[ram]:2 src);
+	dnib1 = dnib1+2;
+	nib6 = nib6-1;
+	vf = (nib6 == 0);
+}
+
+:OUTIB @nib5,@dnib1,nib6 is op8=0x3A & dnib1 & nib0=0x2; nib7=0 & nib6 & nib5 & nib4=0x8
+{
+    local dst:2 = nib5;
+    local src:4 = dnib1;
+
+	IoWrite(dst,*[ram]:1 src);
+	dnib1 = dnib1+1;
+	nib6 = nib6-1;
+	vf = (nib6 == 0);
+}
+
+:SOUTI @nib5,@dnib1,nib6 is op8=0x3B & dnib1 & nib0=0x3; nib7=0 & nib6 & nib5 & nib4=0x8
+{
+    local dst:2 = nib5;
+    local src:4 = dnib1;
+
+	IoWrite(dst,*[ram]:2 src);
+	dnib1 = dnib1+2;
+	nib6 = nib6-1;
+	vf = (nib6 == 0);
+}
+
+:SOUTIB @nib5,@dnib1,nib6 is op8=0x3A & dnib1 & nib0=0x3; nib7=0 & nib6 & nib5 & nib4=0x8
+{
+    local dst:2 = nib5;
+    local src:4 = dnib1;
+
+	IoWrite(dst,*[ram]:1 src);
+	dnib1 = dnib1+1;
+	nib6 = nib6-1;
+	vf = (nib6 == 0);
+}
 
 # POP p 156
 # --- registers  ---
@@ -3485,21 +3758,117 @@ eval_jp: is cc_jp
 
 # TRDB p 195
 # TRDB @rr1,@rr2,rx
-:TRDB @dnib1,@dnib5,nib6 is op8=0xB8 & dnib1 & nib0=0x8; nib7=0 & nib6 & dnib5 & nib4=0 {}
+:TRDB @dnib1,@dnib5,nib6 is op8=0xB8 & dnib1 & nib0=0x8; nib7=0 & nib6 & dnib5 & nib4=0
+{
+    local dst:4 = dnib1;
+    local src:4 = dnib5;
+	local idx:1 = *[ram]:1 dst;
+	local addr:4 = src + zext(idx);
+	*[ram]:1 dst = *[ram]:1 addr;
+	dnib1 = dnib1-1;
+	nib6 = nib6-1;
+	vf = (nib6 == 0);
+}
+
 # TRDRB p 196
-:TRDRB @dnib1,@dnib5,nib6 is op8=0xB8 & dnib1 & nib0=0xC; nib7=0 & nib6 & dnib5 & nib4=0 {}
+:TRDRB @dnib1,@dnib5,nib6 is op8=0xB8 & dnib1 & nib0=0xC; nib7=0 & nib6 & dnib5 & nib4=0
+{
+    local dst:4 = dnib1;
+    local src:4 = dnib5;
+	local idx:1 = *[ram]:1 dst;
+	local addr:4 = src + zext(idx);
+	*[ram]:1 dst = *[ram]:1 addr;
+	dnib1 = dnib1-1;
+	nib6 = nib6-1;
+	vf = (nib6 == 0);
+    if (!vf) goto inst_start;
+}
+
 # TRIB p 198
-:TRIB @dnib1,@dnib5,nib6 is op8=0xB8 & dnib1 & nib0=0x0; nib7=0 & nib6 & dnib5 & nib4=0 {}
+:TRIB @dnib1,@dnib5,nib6 is op8=0xB8 & dnib1 & nib0=0x0; nib7=0 & nib6 & dnib5 & nib4=0
+{
+    local dst:4 = dnib1;
+    local src:4 = dnib5;
+	local idx:1 = *[ram]:1 dst;
+	local addr:4 = src + zext(idx);
+	*[ram]:1 dst = *[ram]:1 addr;
+	dnib1 = dnib1+1;
+	nib6 = nib6-1;
+	vf = (nib6 == 0);
+}
+
 # TRIRB p 200
-:TRIRB @dnib1,@dnib5,nib6 is op8=0xB8 & dnib1 & nib0=0x4; nib7=0 & nib6 & dnib5 & nib4=0 {}
+:TRIRB @dnib1,@dnib5,nib6 is op8=0xB8 & dnib1 & nib0=0x4; nib7=0 & nib6 & dnib5 & nib4=0
+{
+    local dst:4 = dnib1;
+    local src:4 = dnib5;
+	local idx:1 = *[ram]:1 dst;
+	local addr:4 = src + zext(idx);
+	*[ram]:1 dst = *[ram]:1 addr;
+	dnib1 = dnib1+1;
+	nib6 = nib6-1;
+	vf = (nib6 == 0);
+    if (!vf) goto inst_start;
+}
+
 # TRTDB p 202
-:TRTDB @dnib1,@dnib5,nib6 is op8=0xB8 & dnib1 & nib0=0xA; nib7=0 & nib6 & dnib5 & nib4=0 {}
+# TRTDB @rr1,@rr2,r
+:TRTDB @dnib1,@dnib5,nib6 is op8=0xB8 & dnib1 & nib0=0xA; nib7=0 & nib6 & dnib5 & nib4=0
+{
+    local src1:4 = dnib1;
+    local src2:4 = dnib5;
+	local idx:1 = *[ram]:1 src1;
+	local addr:4 = src2 + zext(idx);
+	rh1 = *[ram]:1 addr;
+	zf = (rh1 == 0);
+	dnib1 = dnib1-1;
+	nib6 = nib6-1;
+	vf = (nib6 == 0);
+}
+
 # TRTDRB p 203
-:TRTDRB @dnib1,@dnib5,nib6 is op8=0xB8 & dnib1 & nib0=0xE; nib7=0 & nib6 & dnib5 & nib4=0 {}
+:TRTDRB @dnib1,@dnib5,nib6 is op8=0xB8 & dnib1 & nib0=0xE; nib7=0 & nib6 & dnib5 & nib4=0
+{
+    local src1:4 = dnib1;
+    local src2:4 = dnib5;
+	local idx:1 = *[ram]:1 src1;
+	local addr:4 = src2 + zext(idx);
+	rh1 = *[ram]:1 addr;
+	zf = (rh1 == 0);
+	dnib1 = dnib1-1;
+	nib6 = nib6-1;
+	vf = (nib6 == 0);
+    if (!vf) goto inst_start;
+}
+
 # TRTIB p 205
-:TRTIB @dnib1,@dnib5,nib6 is op8=0xB8 & dnib1 & nib0=0x2; nib7=0 & nib6 & dnib5 & nib4=0 {}
+:TRTIB @dnib1,@dnib5,nib6 is op8=0xB8 & dnib1 & nib0=0x2; nib7=0 & nib6 & dnib5 & nib4=0
+{
+    local src1:4 = dnib1;
+    local src2:4 = dnib5;
+	local idx:1 = *[ram]:1 src1;
+	local addr:4 = src2 + zext(idx);
+	rh1 = *[ram]:1 addr;
+	zf = (rh1 == 0);
+	dnib1 = dnib1+1;
+	nib6 = nib6-1;
+	vf = (nib6 == 0);
+}
+
 # TRTIRB p 207
-:TRTIRB @dnib1,@dnib5,nib6 is op8=0xB8 & dnib1 & nib0=0x6; nib7=0 & nib6 & dnib5 & nib4=0xE {}
+:TRTIRB @dnib1,@dnib5,nib6 is op8=0xB8 & dnib1 & nib0=0x6; nib7=0 & nib6 & dnib5 & nib4=0xE
+{
+    local src1:4 = dnib1;
+    local src2:4 = dnib5;
+	local idx:1 = *[ram]:1 src1;
+	local addr:4 = src2 + zext(idx);
+	rh1 = *[ram]:1 addr;
+	zf = (rh1 == 0);
+	dnib1 = dnib1+1;
+	nib6 = nib6-1;
+	vf = (nib6 == 0);
+    if (!vf) goto inst_start;
+}
 
 # TSET p 209
 # --- registers  ---
