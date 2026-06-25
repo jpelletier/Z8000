@@ -274,6 +274,7 @@ macro set_zs_d(result)
     sf = (result >= 0x80000000);
 }
 
+# RR, RRC, RL, RLC
 macro set_lczsv_b(result,value) 
 {
 	cf = ((value & 0x80) == 0x80);
@@ -357,46 +358,6 @@ macro set2_fl_32(op1, op2, res) {
     zf = (res == 0);
     sf = (res >= 0x80000000);
     vf = (((op1 ^ res) & (op2 ^ res)) >= 0x80000000);
-}
-
-# FIXME Generates Unnecessary truncation(:) warnings
-macro calculateParity(val,pf) {
-    local b0 = val[0,1];
-    local b1 = val[1,1];
-    local b2 = val[2,1];
-    local b3 = val[3,1];
-    local b4 = val[4,1];
-    local b5 = val[5,1];
-    local b6 = val[6,1];
-    local b7 = val[7,1];
-    
-    # XOR all bits together
-    # PF = 1 if even, 0 if odd
-    pf = !(b0 ^ b1 ^ b2 ^ b3 ^ b4 ^ b5 ^ b6 ^ b7);
-}
-
-# FIXME Generates Unnecessary truncation(:) warnings
-macro calculateParity16(val,pf) {
-    local b0  = val[0,1];
-    local b1  = val[1,1];
-    local b2  = val[2,1];
-    local b3  = val[3,1];
-    local b4  = val[4,1];
-    local b5  = val[5,1];
-    local b6  = val[6,1];
-    local b7  = val[7,1];
-    local b8  = val[8,1];
-    local b9  = val[9,1];
-    local b10 = val[10,1];
-    local b11 = val[11,1];
-    local b12 = val[12,1];
-    local b13 = val[13,1];
-    local b14 = val[14,1];
-    local b15 = val[15,1];
-    
-    # XOR all bits together
-    # PF = 1 if even, 0 if odd
-    pf = !(b0 ^ b1 ^ b2 ^ b3 ^ b4 ^ b5 ^ b6 ^ b7 ^ b8 ^ b9 ^ b10 ^ b11 ^ b12 ^ b13 ^ b14 ^ b15);
 }
 
 macro set_zsp_b(result) 
@@ -3400,21 +3361,28 @@ eval_jp: is cc_jp
 # RLCB r1,#n
 :RLCB bnib1,"#1" is op8=0xB2 & bnib1 & nib0=0x8
 {
-	res = (bnib1 << 1) | zext(cf);
+	res = (bnib1 << 1) | cf;
 	set_lczsv_b(res,bnib1);
 	bnib1 = res;
 }
 
 :RLCB bnib1,"#2" is op8=0xB2 & bnib1 & nib0=0xA
 {
-	res = (bnib1 << 2) | (zext(cf) << 1) | (bnib1 >> 15);
+	res = (bnib1 << 2) | (cf << 1) | (bnib1 >> 15);
 	set_lczsv_b(res,bnib1);
 	bnib1 = res;
 }
 
 # RLDB p 166
-# RLDB r1,r2
-:RLDB nib0,nib1 is op8=0xBE & nib1 & nib0 {}
+# RLDB link, src
+# RLDB rx1,rx2
+:RLDB bnib0,bnib1 is op8=0xBE & bnib1 & bnib0
+{
+	local tmp:1 = bnib1 >> 4;
+	bnib1 = (bnib1 << 4) | (bnib0 & 0x0f);
+	bnib0 = (bnib0 & 0xf0) | tmp;
+	zf = (bnib1 == 0);
+}
 
 # RR p 168
 # RR r1,#n
@@ -3472,21 +3440,27 @@ eval_jp: is cc_jp
 # RRCB r1,#n
 :RRCB bnib1,"#1" is op8=0xB2 & bnib1 & nib0=0xC
 {
-	res = (zext(cf) << 7) | (bnib1 >> 1);
+	res = (cf << 7) | (bnib1 >> 1);
 	set_rczsv_b(res,bnib1); #FIXME cf doesn't work because of rotate bit 0 instead of 7
 	bnib1 = res;
 }
 
 :RRCB bnib1,"#2" is op8=0xB2 & bnib1 & nib0=0xE
 {
-	res = (bnib1 << 7) | (zext(cf) << 6) | (bnib1 >> 2);
+	res = (bnib1 << 7) | (cf << 6) | (bnib1 >> 2);
 	set_rczsv_b(res,bnib1);
 	bnib1 = res;
 }
 
 # RRDB p 170
-# RRDB r1,r2
-:RRDB nib0,nib1 is op8=0xBC & nib1 & nib0 {}
+# RRDB rx1,rx2
+:RRDB bnib0,bnib1 is op8=0xBC & bnib1 & bnib0
+{
+	local tmp:1 = bnib1 & 0x0f;
+	bnib1 = (bnib1 >> 4) | (bnib0 << 4);
+	bnib0 = (bnib0 & 0xf0) | tmp;
+	zf = (bnib1 == 0);
+}
 
 # SBC p 172
 # --- registers  ---
