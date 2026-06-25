@@ -274,6 +274,38 @@ macro set_zs_d(result)
     sf = (result >= 0x80000000);
 }
 
+macro set_lczsv_b(result,value) 
+{
+	cf = ((value & 0x80) == 0x80);
+    zf = (result == 0:1);
+    sf = (result >= 0x80);
+	vf = ((result ^ value) >= 0x80);
+}
+
+macro set_lczsv_w(result,value) 
+{
+	cf = ((value & 0x8000) == 0x8000);
+    zf = (result == 0:2);
+    sf = (result >= 0x8000);
+	vf = ((result ^ value) >= 0x80);
+}
+
+macro set_rczsv_b(result,value) 
+{
+	cf = ((value & 0x01) == 0x01);
+    zf = (result == 0:1);
+    sf = (result >= 0x80);
+	vf = ((result ^ value) >= 0x80);
+}
+
+macro set_rczsv_w(result,value) 
+{
+	cf = ((value & 0x0001) == 0x0001);
+    zf = (result == 0:2);
+    sf = (result >= 0x8000);
+	vf = ((result ^ value) >= 0x80);
+}
+
 # ADC, ADD, SBC, SUB
 # Arguments: Destination, Operand1, Operand2, Result, CarryIn
 macro set_fl_8(dst, op1, op2, res, cin) {
@@ -367,25 +399,22 @@ macro calculateParity16(val,pf) {
     pf = !(b0 ^ b1 ^ b2 ^ b3 ^ b4 ^ b5 ^ b6 ^ b7 ^ b8 ^ b9 ^ b10 ^ b11 ^ b12 ^ b13 ^ b14 ^ b15);
 }
 
-#FIXME Sleigh throws a tantrum
 macro set_zsp_b(result) 
 {
-#    zf = (result == 0:1);
-#    sf = ((result & 0x80:1) != 0:1);
-# FIXME Generates Unnecessary truncation(:) warnings
-#	calculateParity(result,pf);
+    zf = (result == 0x00);
+    sf = ((result & 0x80) != 0x00);
+
+	local tmp:1 = popcount(result);  # nb of '1' bits
+	pf = ((tmp & 0x01) == 0x00);	 # 1 = nb is even
 }
 
-#FIXME Sleigh throws a tantrum
 macro set_zsp_w(result) 
 {
-#    zf = (result == 0:2);
+    zf = (result == 0x0000);
+    sf = ((result & 0x8000) != 0x0000);
 
-# FIXME
-
-#    sf = ((result & 0x8000:2) != 0:2);
-# FIXME Generates Unnecessary truncation(:) warnings
-#	calculateParity16(result,pf);
+	local tmp:2 = popcount(result);  # nb of '1' bits
+	pf = ((tmp & 0x0001) == 0x0000); # 1 = nb is even
 }
 
 macro dynamic_jump(target) 
@@ -3313,25 +3342,75 @@ eval_jp: is cc_jp
 :RET is op16=0x9E08 {}
 # FIXME cc
 # RET cc
-:RET nib0 is op8=0x9E & nib1=0 & nib0 {}
+:RET nib0 is op8=0x9E & nib1=0 & nib0
+{
+	#return
+}
 
 # RL p 164
 # RL r1,#n
-:RL nib1,"#1" is op8=0xB3 & nib1 & nib0=0 {}
-:RL nib1,"#2" is op8=0xB3 & nib1 & nib0=2 {}
+:RL nib1,"#1" is op8=0xB3 & nib1 & nib0=0
+{
+	res = (nib1 << 1) | (nib1 >> 15);
+	set_lczsv_w(res,nib1);
+	nib1 = res;
+}
+
+:RL nib1,"#2" is op8=0xB3 & nib1 & nib0=2
+{
+	res = (nib1 << 2) | (nib1 >> 14);
+	set_lczsv_w(res,nib1);
+	nib1 = res;
+}
 
 # RLB r1,#n
-:RLB bnib1,"#1" is op8=0xB2 & bnib1 & nib0=0 {} 
-:RLB bnib1,"#1" is op8=0xB2 & bnib1 & nib0=2 {} 
+:RLB bnib1,"#1" is op8=0xB2 & bnib1 & nib0=0
+{
+	res:1 = (bnib1 << 1) | (bnib1 >> 7);
+	set_lczsv_b(res,bnib1);
+	bnib1 = res;
+}
+
+:RLB bnib1,"#2" is op8=0xB2 & bnib1 & nib0=2
+{
+	res:1 = (bnib1 << 2) | (bnib1 >> 6);
+	set_lczsv_b(res,bnib1);
+	bnib1 = res;
+}
 
 # RLC p 165
 # RLC r1,#n
-:RLC nib1,"#1" is op8=0xB3 & nib1 & nib0=0x8 {}
-:RLC nib1,"#2" is op8=0xB3 & nib1 & nib0=0xA {}
+:RLC nib1,"#1" is op8=0xB3 & nib1 & nib0=0x8
+{
+	res = (nib1 << 1) | zext(cf);
+	set_lczsv_w(res,nib1);
+	nib1 = res;
+}
+
+# Y FEDCBA9876543210: 0
+# F EDCBA9876543210Y: 1
+# E DCBA9876543210YF: 2
+:RLC nib1,"#2" is op8=0xB3 & nib1 & nib0=0xA
+{
+	res = (nib1 << 2) | (zext(cf) << 1) | (nib1 >> 15);
+	set_lczsv_w(res,nib1);
+	nib1 = res;
+}
 
 # RLCB r1,#n
-:RLCB nib1,"#1" is op8=0xB2 & nib1 & nib0=0x8 {}
-:RLCB nib1,"#2" is op8=0xB2 & nib1 & nib0=0xA {}
+:RLCB bnib1,"#1" is op8=0xB2 & bnib1 & nib0=0x8
+{
+	res = (bnib1 << 1) | zext(cf);
+	set_lczsv_b(res,bnib1);
+	bnib1 = res;
+}
+
+:RLCB bnib1,"#2" is op8=0xB2 & bnib1 & nib0=0xA
+{
+	res = (bnib1 << 2) | (zext(cf) << 1) | (bnib1 >> 15);
+	set_lczsv_b(res,bnib1);
+	bnib1 = res;
+}
 
 # RLDB p 166
 # RLDB r1,r2
@@ -3339,21 +3418,71 @@ eval_jp: is cc_jp
 
 # RR p 168
 # RR r1,#n
-:RR nib1,"#1" is op8=0xB3 & nib1 & nib0=0x4 {}
-:RR nib1,"#2" is op8=0xB3 & nib1 & nib0=0x6 {}
+:RR nib1,"#1" is op8=0xB3 & nib1 & nib0=0x4
+{
+	res = (nib1 << 15) | (nib1 >> 1);
+	set_rczsv_w(res,nib1);
+	nib1 = res;
+}
+
+:RR nib1,"#2" is op8=0xB3 & nib1 & nib0=0x6
+{
+	res = (nib1 << 14) | (nib1 >> 2);
+	set_rczsv_w(res,nib1);
+	nib1 = res;
+}
 
 # RRB r1,#n
-:RRB bnib1,"#1" is op8=0xB2 & bnib1 & nib0=0x4 {} 
-:RRB bnib1,"#1" is op8=0xB2 & bnib1 & nib0=0x6 {} 
+:RRB bnib1,"#1" is op8=0xB2 & bnib1 & nib0=0x4
+{
+	res:1 = (bnib1 << 7) | (bnib1 >> 1);
+	set_rczsv_b(res,bnib1);
+	bnib1 = res;
+}
+
+:RRB bnib1,"#2" is op8=0xB2 & bnib1 & nib0=0x6
+{
+	res:1 = (bnib1 << 6) | (bnib1 >> 2);
+	set_rczsv_b(res,bnib1);
+	bnib1 = res;
+}
 
 # RRC p 169
 # RRC r1,#n
-:RRC nib1,"#1" is op8=0xB3 & nib1 & nib0=0xC {}
-:RRC nib1,"#2" is op8=0xB3 & nib1 & nib0=0xE {}
+:RRC nib1,"#1" is op8=0xB3 & nib1 & nib0=0xC
+{
+	res = (zext(cf) << 15) | (nib1 >> 1);
+	set_rczsv_w(res,nib1);
+	nib1 = res;
+}
 
+# Y FEDCBA9876543210: 0
+# 0 YFEDCBA987654321: 1
+# 1 0YFEDCBA98765432: 2
+:RRC nib1,"#2" is op8=0xB3 & nib1 & nib0=0xE
+{
+	res = (nib1 << 15) | (zext(cf) << 14) | (nib1 >> 2);
+	set_rczsv_w(res,nib1);
+	nib1 = res;
+}
+
+# Y 76543210: 0
+# 0 Y7654321: 1
+# 1 0Y765432: 2
 # RRCB r1,#n
-:RRCB nib1,"#1" is op8=0xB2 & nib1 & nib0=0xC {}
-:RRCB nib1,"#2" is op8=0xB2 & nib1 & nib0=0xE {}
+:RRCB bnib1,"#1" is op8=0xB2 & bnib1 & nib0=0xC
+{
+	res = (zext(cf) << 7) | (bnib1 >> 1);
+	set_rczsv_b(res,bnib1); #FIXME cf doesn't work because of rotate bit 0 instead of 7
+	bnib1 = res;
+}
+
+:RRCB bnib1,"#2" is op8=0xB2 & bnib1 & nib0=0xE
+{
+	res = (bnib1 << 7) | (zext(cf) << 6) | (bnib1 >> 2);
+	set_rczsv_b(res,bnib1);
+	bnib1 = res;
+}
 
 # RRDB p 170
 # RRDB r1,r2
