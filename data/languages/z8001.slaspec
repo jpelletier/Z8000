@@ -65,6 +65,8 @@ define token opword (16)
 	disp7	 = ( 0, 6)
 	byte0	 = ( 0, 7)
 
+    snib6	 = ( 8,11)	 signed
+
 	nib7	 = (12,15)
     nib6	 = ( 8,11)
 	nib5	 = ( 4, 7)
@@ -267,7 +269,7 @@ macro set_zs_d(result)
     sf = (result >= 0x80000000);
 }
 
-# RR, RRC, RL, RLC
+# RR, RRC, RL, RLC, SDA, SDL, SLA, SRA,
 macro set_lczsv_b(result,value) 
 {
 	cf = ((value & 0x80) == 0x80);
@@ -281,7 +283,15 @@ macro set_lczsv_w(result,value)
 	cf = ((value & 0x8000) == 0x8000);
     zf = (result == 0:2);
     sf = (result >= 0x8000);
-	vf = ((result ^ value) >= 0x80);
+	vf = ((result ^ value) >= 0x8000);
+}
+
+macro set_lczsv_l(result,value) 
+{
+	cf = ((value & 0x80000000) == 0x80000000);
+    zf = (result == 0:4);
+    sf = (result >= 0x80000000);
+	vf = ((result ^ value) >= 0x80000000);
 }
 
 macro set_rczsv_b(result,value) 
@@ -297,7 +307,58 @@ macro set_rczsv_w(result,value)
 	cf = ((value & 0x0001) == 0x0001);
     zf = (result == 0:2);
     sf = (result >= 0x8000);
-	vf = ((result ^ value) >= 0x80);
+	vf = ((result ^ value) >= 0x8000);
+}
+
+macro set_rczsv_l(result,value) 
+{
+	cf = ((value & 0x00000001) == 0x00000001);
+    zf = (result == 0:4);
+    sf = (result >= 0x80000000);
+	vf = ((result ^ value) >= 0x80000000);
+}
+
+# SLL, SRL,
+macro set_lczs_b(result,value) 
+{
+	cf = ((value & 0x80) == 0x80);
+    zf = (result == 0:1);
+    sf = (result >= 0x80);
+}
+
+macro set_lczs_w(result,value) 
+{
+	cf = ((value & 0x8000) == 0x8000);
+    zf = (result == 0:2);
+    sf = (result >= 0x8000);
+}
+
+macro set_lczs_l(result,value) 
+{
+	cf = ((value & 0x80000000) == 0x80000000);
+    zf = (result == 0:4);
+    sf = (result >= 0x80000000);
+}
+
+macro set_rczs_b(result,value) 
+{
+	cf = ((value & 0x01) == 0x01);
+    zf = (result == 0:1);
+    sf = (result >= 0x80);
+}
+
+macro set_rczs_w(result,value) 
+{
+	cf = ((value & 0x0001) == 0x0001);
+    zf = (result == 0:2);
+    sf = (result >= 0x8000);
+}
+
+macro set_rczs_l(result,value) 
+{
+	cf = ((value & 0x00000001) == 0x00000001);
+    zf = (result == 0:4);
+    sf = (result >= 0x80000000);
 }
 
 # ADC, ADD, SBC, SUB
@@ -1280,8 +1341,6 @@ eval_jp: is cc_jp
 # =============================================================================
 # CPIR / CPDR: Repeating String Operations
 # =============================================================================
-#:TCC cc_jp,nib1 is op8=0xAF & nib1 & eval_jp & cc_jp {}
-
 # CPIR: Compare,Increment,and Repeat
 :CPIR nib5,@dnib1,nib6,cc_jp is op8=0xBB & dnib1 & nib0=0x4; nib7=0 & nib6 & nib5 & eval_jp & cc_jp 
 {
@@ -1708,8 +1767,8 @@ eval_jp: is cc_jp
 # EX r1,Addr32(rs)
 :EX nib0,Addr32(nib1) is op8=0x6D & nib1 & nib0; Addr32 
 {
-    local addr:4 = Addr32 + sext(nib1);		#FIXME Use that for other instructions
-    local mem_val:2 = *[ram]addr;	        #FIXME Use that for other instructions
+    local addr:4 = Addr32 + sext(nib1);
+    local mem_val:2 = *[ram]addr;
     *[ram]addr = nib0;
 	nib0 = mem_val;
 }
@@ -2100,7 +2159,7 @@ eval_jp: is cc_jp
 # Unconditional Jump Relative
 :JR rel8 is op4=0xE & cc_jr=0x8 & rel8 
 {
-#	goto [inst_next + rel8];
+	goto [inst_next + rel8];
 }
 
 # Conditional Jump Relative
@@ -3300,12 +3359,16 @@ eval_jp: is cc_jp
 }
 
 # RET p 163
-:RET is op16=0x9E08 {}
-# FIXME cc
-# RET cc
-:RET nib0 is op8=0x9E & nib1=0 & nib0
+:RET is op16=0x9E08
 {
-	#return
+	pop32(pc);
+}
+
+# RET cc
+:RET cc_jp is op8=0x9E & nib1=0 & eval_jp & cc_jp
+{
+	if (!eval_jp) goto inst_next;
+	pop32(pc);
 }
 
 # RL p 164
@@ -3488,23 +3551,83 @@ eval_jp: is cc_jp
 
 # SDA p 175
 # SDA r1,r2
-:SDA nib1,nib2 is op8=0xB3 & nib1 & nib0=0xB; nib3=0 & nib2 & byte0=0 {}
+:SDA nib1,snib6 is op8=0xB3 & nib1 & nib0=0xB; nib7=0 & snib6 & byte0=0
+{
+	if ((snib6 & 0x8000) == 0x8000:2) goto <sda_neg>;
+#sda_pos shift left
+		res = nib1 << snib6;
+		set_lczsv_w(res,nib1);
+		goto inst_next;
+<sda_neg>	# shift right arithmetic
+		res = nib1 s>> -snib6;
+		set_rczsv_w(res,nib1);
+}
 
 # SDAB rx1,r2
-:SDAB bnib1,nib2 is op8=0xB2 & bnib1 & nib0=0xB; nib3=0 & nib2 & byte0=0 {}
+:SDAB bnib1,snib6 is op8=0xB2 & bnib1 & nib0=0xB; nib3=0 & snib6 & byte0=0
+{
+	if ((snib6 & 0x8000) == 0x8000:2) goto <sda_neg>;
+#sda_pos shift left
+		res = bnib1 << snib6;
+		set_lczsv_b(res,bnib1);
+		goto inst_next;
+<sda_neg>	# shift right arithmetic
+		res = bnib1 s>> -snib6;
+		set_rczsv_b(res,bnib1);
+}
 
 # SDAL rr1,r2
-:SDAL dnib1,nib2 is op8=0xB3 & dnib1 & nib0=0xF; nib3=0 & nib2 & byte0=0 {}
+:SDAL dnib1,snib6 is op8=0xB3 & dnib1 & nib0=0xF; nib3=0 & snib6 & byte0=0
+{
+	if ((snib6 & 0x8000) == 0x8000:2) goto <sda_neg>;
+#sda_pos shift left
+		res = dnib1 << snib6;
+		set_lczsv_l(res,dnib1);
+		goto inst_next;
+<sda_neg>	# shift right arithmetic
+		res = dnib1 s>> -snib6;
+		set_rczsv_l(res,dnib1);
+}
 
 # SDL p 177
 # SDL r1,r2
-:SDL nib1,nib2 is op8=0xB3 & nib1 & nib0=0x3; nib3=0 & nib2 & byte0=0 {}
+:SDL nib1,snib6 is op8=0xB3 & nib1 & nib0=0x3; nib7=0 & snib6 & byte0=0
+{
+	if ((snib6 & 0x8000) == 0x8000:2) goto <sda_neg>;
+#sda_pos shift left
+		res = nib1 << snib6;
+		set_lczsv_w(res,nib1);
+		goto inst_next;
+<sda_neg>	# shift right arithmetic
+		res = nib1 >> -snib6;
+		set_rczsv_w(res,nib1);
+}
 
 # SDLB rx1,r2
-:SDLB bnib1,nib2 is op8=0xB2 & bnib1 & nib0=0x3; nib3=0 & nib2 & byte0=0 {}
+:SDLB bnib1,snib6 is op8=0xB2 & bnib1 & nib0=0x3; nib7=0 & snib6 & byte0=0
+{
+	if ((snib6 & 0x8000) == 0x8000:2) goto <sda_neg>;
+#sda_pos shift left
+		res = bnib1 << snib6;
+		set_lczsv_b(res,bnib1);
+		goto inst_next;
+<sda_neg>	# shift right arithmetic
+		res = bnib1 >> -snib6;
+		set_rczsv_b(res,bnib1);
+}
 
 # SDLL rr1,r2
-:SDLL dnib1,nib2 is op8=0xB3 & dnib1 & nib0=0x7; nib3=0 & nib2 & byte0=0 {}
+:SDLL dnib1,snib6 is op8=0xB3 & dnib1 & nib0=0x7; nib7=0 & snib6 & byte0=0
+{
+	if ((snib6 & 0x8000) == 0x8000:2) goto <sda_neg>;
+#sda_pos shift left
+		res = dnib1 << snib6;
+		set_lczsv_l(res,dnib1);
+		goto inst_next;
+<sda_neg>	# shift right arithmetic
+		res = dnib1 >> -snib6;
+		set_rczsv_l(res,dnib1);
+}
 
 # SET p 179
 # === dynamic ===
@@ -3596,24 +3719,80 @@ eval_jp: is cc_jp
 
 # SLA p 182
 # SLA r1,#n
-:SLA nib1,#imm16 is op8=0xB3 & nib1 & nib0=0x9; imm_sign=0 & imm16 {}
-:SLAB bnib1,#imm16 is op8=0xB2 & bnib1 & nib0=0x9; imm_sign=0 & imm16 {}
-:SLAL dnib1,#imm16 is op8=0xB3 & dnib1 & nib0=0xD; imm_sign=0 & imm16 {}
+:SLA nib1,#imm16 is op8=0xB3 & nib1 & nib0=0x9; imm_sign=0 & imm16
+{
+	res = nib1 << imm16;
+	set_lczsv_w(res,nib1);
+}
+
+:SLAB bnib1,#imm16 is op8=0xB2 & bnib1 & nib0=0x9; imm_sign=0 & imm16
+{
+	res = bnib1 << imm16;
+	set_lczsv_b(res,bnib1);
+}
+
+:SLAL dnib1,#imm16 is op8=0xB3 & dnib1 & nib0=0xD; imm_sign=0 & imm16
+{
+	res = dnib1 << imm16;
+	set_lczsv_l(res,dnib1);
+}
 
 # SLL p 184
-:SLL nib1,#imm16 is op8=0xB3 & nib1 & nib0=0x1; imm_sign=0 & imm16 {}
-:SLLB bnib1,#imm16 is op8=0xB2 & bnib1 & nib0=0x1; imm_sign=0 & imm16 {}
-:SLLL dnib1,#imm16 is op8=0xB3 & dnib1 & nib0=0x5; imm_sign=0 & imm16 {}
+:SLL nib1,#imm16 is op8=0xB3 & nib1 & nib0=0x1; imm_sign=0 & imm16
+{
+	res = nib1 << imm16;
+	set_lczs_w(res,nib1);
+}
+
+:SLLB bnib1,#imm16 is op8=0xB2 & bnib1 & nib0=0x1; imm_sign=0 & imm16
+{
+	res = bnib1 << imm16;
+	set_lczs_b(res,bnib1);
+}
+
+:SLLL dnib1,#imm16 is op8=0xB3 & dnib1 & nib0=0x5; imm_sign=0 & imm16
+{
+	res = dnib1 << imm16;
+	set_lczs_l(res,dnib1);
+}
 
 # SRA p 186
-:SRA nib1,#imm16 is op8=0xB3 & nib1 & nib0=0x9; imm_sign=1 & imm16 {}
-:SRAB bnib1,#imm16 is op8=0xB2 & bnib1 & nib0=0x9; imm_sign=1 & imm16 {}
-:SRAL dnib1,#imm16 is op8=0xB3 & dnib1 & nib0=0xD; imm_sign=1 & imm16 {}
+:SRA nib1,#imm16 is op8=0xB3 & nib1 & nib0=0x9; imm_sign=1 & imm16
+{
+	res = nib1 s>> imm16;
+	set_rczsv_w(res,nib1);
+}
+
+:SRAB bnib1,#imm16 is op8=0xB2 & bnib1 & nib0=0x9; imm_sign=1 & imm16
+{
+	res = bnib1 s>> imm16;
+	set_rczsv_b(res,bnib1);
+}
+
+:SRAL dnib1,#imm16 is op8=0xB3 & dnib1 & nib0=0xD; imm_sign=1 & imm16
+{
+	res = dnib1 s>> imm16;
+	set_rczsv_l(res,dnib1);
+}
 
 # SRL p 188
-:SRL nib1,#imm16 is op8=0xB3 & nib1 & nib0=0x1; imm_sign=1 & imm16 {}
-:SRLB bnib1,#imm16 is op8=0xB2 & bnib1 & nib0=0x1; imm_sign=1 & imm16 {}
-:SRLL dnib1,#imm16 is op8=0xB3 & dnib1 & nib0=0x5; imm_sign=1 & imm16 {}
+:SRL nib1,#imm16 is op8=0xB3 & nib1 & nib0=0x1; imm_sign=1 & imm16
+{
+	local res:2 = nib1 >> imm16;
+	set_rczs_w(res,nib1);
+}
+
+:SRLB bnib1,#imm16 is op8=0xB2 & bnib1 & nib0=0x1; imm_sign=1 & imm16
+{
+	local res:1 = bnib1 >> imm16;
+	set_rczs_b(res,bnib1);
+}
+
+:SRLL dnib1,#imm16 is op8=0xB3 & dnib1 & nib0=0x5; imm_sign=1 & imm16
+{
+	local res:4 = dnib1 >> imm16;
+	set_rczs_l(res,dnib1);
+}
 
 # p 190 SUB
 # --- registers  ---
