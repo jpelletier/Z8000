@@ -220,7 +220,7 @@ macro push16(val)
     r15 = r15 - 2:2;
     
     # 2. Store the 16-bit value onto the RAM space at the address formed by rr14
-    *:2 rr14 = val;
+    *[ram]:2 rr14 = val;
 }
 
 macro push32(val) 
@@ -229,13 +229,19 @@ macro push32(val)
     r15 = r15 - 4:2;
     
     # 2. Store the 32-bit value onto the RAM space at the address formed by rr14
-    *:4 rr14 = val;
+    *[ram]:4 rr14 = val:4;
+}
+
+macro push32_pc()
+{
+	r15 = r15 - 4:2;
+    *[ram]:4 rr14 = inst_next;
 }
 
 macro pop16(dst) 
 {
     # 1. Read the 16-bit value from RAM at the current rr14 address
-    dst = *:2 rr14;
+    dst = *[ram]:2 rr14;
     
     # 2. Increment the 16-bit offset portion of the Stack Pointer (r15)
     r15 = r15 + 2:2;
@@ -244,7 +250,7 @@ macro pop16(dst)
 macro pop32(dst) 
 {
     # 1. Read the 32-bit value from RAM at the current rr14 address
-    dst = *:4 rr14;
+    dst = *[ram]:4 rr14;
     
     # 2. Increment the 16-bit offset portion of the Stack Pointer (r15)
     r15 = r15 + 4:2;
@@ -882,12 +888,14 @@ eval_jp: is cc_jp
 :CALL @dnib1 is op8=0x1F & dnib1 & nib0=0 
 {
 	local target:4 = dnib1;
+	push32_pc();
     call [target];
 }
 
 # CALL Addr32
 :CALL Addr32 is op16=0x5F00; Addr32 
 {
+	push32_pc();
     call [Addr32];
 }
 
@@ -896,12 +904,14 @@ eval_jp: is cc_jp
 {
     local addr:4 = Addr32 + sext(nib1);
     local tmp:4 = *[ram]:4 addr;
+	push32_pc();
 	call [tmp];
 }
 
 #CALR p 65
 :CALR rel12 is op4=0xD & rel12 
 {
+	push32_pc();
     call rel12;
 }
 
@@ -2117,24 +2127,21 @@ eval_jp: is cc_jp
 # Native Z8000 Opcode: 0x7B00
 # Z8001 Segmented Behavior: Pops FCW (2 bytes) then pops the segmented PC (4 bytes) 
 # off the system stack tracker (r15).
-:IRET is op16=0x7B00 
+:IRET is op16=0x7B00 # Assuming 0x7B00 is your IRET opcode pattern
 {
-    local stack_ptr:4;
-    
-    # 1. Pop the 16-bit FCW status word from the stack
-    getLinearAddress(rr14,stack_ptr);
-    FCW = *:2 stack_ptr;
-    rr14 = rr14 + 2; # Adjust stack pointer up
-    
-    # 2. Pop the 32-bit Segmented Program Counter from the stack
-    getLinearAddress(rr14,stack_ptr);
-    local target_pc:4 = *:4 stack_ptr;
-    rr14 = rr14 + 4; # Adjust stack pointer up
-    
-    # 3. Reconstruct and jump directly to the target linear address space
-    local linear_pc:4;
-    getLinearAddress(target_pc,linear_pc);
-    return [linear_pc];
+	# 1. Pop and discard the system call / interrupt identifier word
+	local identifier:2;
+	pop16(identifier);
+
+	# 2. Restore the Flag and Control Word
+	pop16(FCW);
+
+	# 3. Pop the 32-bit saved Program Counter
+	local restore_pc:4;
+	pop32(restore_pc:4);
+
+	# 4. Return to the original execution path
+	goto [restore_pc];
 }
 
 # JP p 106
@@ -3547,7 +3554,34 @@ eval_jp: is cc_jp
 
 # SC p 173
 # SC #data
-:SC #byte0 is op8=0x7F & byte0 {}
+:SC #byte0 is op8=0x7F & byte0
+{
+	# 1. Save old state to the system stack
+	push32(pc);
+	push16(FCW);
+	push16(0x7f00:2 | byte0);
+
+	# 2. Shift the segment register to the high 16 bits of a 32-bit temporary variable
+	local seg_high:4 = zext(PSAPSEG) << 16;
+
+	# 3. Create the 32-bit pointers by combining the shifted segment and the offsets
+	local new_fcw_addr:4    = seg_high | zext(PSAPOFF + 0x1A);
+	local new_pc_seg_addr:4 = seg_high | zext(PSAPOFF + 0x1C);
+	local new_pc_off_addr:4 = seg_high | zext(PSAPOFF + 0x1E);
+
+
+	# 4. Load the new FCW and target PC coordinates from memory
+	local new_fcw:2    = *[ram]:2 new_fcw_addr;
+	local target_seg:2 = *[ram]:2 new_pc_seg_addr;
+	local target_off:2 = *[ram]:2 new_pc_off_addr;
+
+	# 5. Apply the new processor state 
+	FCW = new_fcw;
+
+	# 6. Construct the final 32-bit segmented destination pointer and branch
+	local destination:4 = (zext(target_seg) << 16) | zext(target_off);
+	goto [destination];
+}
 
 # SDA p 175
 # SDA r1,r2
