@@ -1,6 +1,3 @@
-#FIXME add set flags to instructions
-#FIXME add check for nib1 != 0 where needed
-
 # ---------------------------------------------------------
 # CORE ARCHITECTURE DEFINITIONS
 # ---------------------------------------------------------
@@ -168,6 +165,8 @@ attach variables [ qnib0 qnib1 ]
 ];
 
 # Attach the displacement relative calculation to a target operand
+attach values value0 [ 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 ];
+
 rel16: RelAddr16 is disp16
 [
 	RelAddr16 = inst_next + disp16;
@@ -197,6 +196,13 @@ rel7: RelAddr7 is disp7
 Addr32: seg_num, off16 is seg_bit=1 & seg_num; off16 
 {
     local tmp:4 = (seg_num << 16) | off16;
+    export tmp;
+}
+
+Addr32: off16 is seg_bit=0 & off16 
+{
+	# Short segment form (implied segment or 8-bit offset form)
+    local tmp:4 = off16;
     export tmp;
 }
 
@@ -1571,7 +1577,7 @@ eval_jp: is cc_jp
 
 # DEC p87
 # DEC r1,n
-:DEC nib1,value0 is op8=0xAB & nib1 & value0 
+:DEC nib1,#value0 is op8=0xAB & nib1 & value0 
 {
 	local op2 = 1 + value0;
     nib1 = nib1 - op2;
@@ -1579,7 +1585,7 @@ eval_jp: is cc_jp
 }
 
 # DECB r1,n
-:DECB bnib1,value0 is op8=0xAA & bnib1 & value0 
+:DECB bnib1,#value0 is op8=0xAA & bnib1 & value0 
 {
 	local op2:1 = 1 + value0;
     bnib1 = bnib1 - op2;
@@ -1588,7 +1594,7 @@ eval_jp: is cc_jp
 
 # --- indirect reg ---
 # DEC @r1
-:DEC @dnib1,value0 is op8=0x2B & dnib1 & value0 
+:DEC @dnib1,#value0 is op8=0x2B & dnib1 & value0 
 {
     local addr:4 = dnib1;
     local op1:2 = *[ram]:2 addr;
@@ -1599,7 +1605,7 @@ eval_jp: is cc_jp
 }
 
 # DECB @r1
-:DECB @dnib1,value0 is op8=0x2A & dnib1 & value0 
+:DECB @dnib1,#value0 is op8=0x2A & dnib1 & value0 
 {
     local addr:4 = dnib1;
     local op1:1 = *[ram]addr;
@@ -1611,7 +1617,7 @@ eval_jp: is cc_jp
 
 # --- direct address ---
 # DEC Addr32
-:DEC Addr32,value0 is op8=0x6B & nib1=0 & value0; Addr32 
+:DEC Addr32,#value0 is op8=0x6B & nib1=0 & value0; Addr32 
 {
     local op1:2 = *[ram]Addr32;
 	local op2:2 = 1 + value0;
@@ -1621,7 +1627,7 @@ eval_jp: is cc_jp
 }
 
 # DECB Addr32
-:DECB Addr32,value0 is op8=0x6A & nib1=0 & value0; Addr32 
+:DECB Addr32,#value0 is op8=0x6A & nib1=0 & value0; Addr32 
 {
     local op1:1 = *[ram]Addr32;
 	local op2:1 = 1 + value0;
@@ -1632,7 +1638,7 @@ eval_jp: is cc_jp
 
 # --- indexed address ---
 # DEC Addr32(rs)
-:DEC Addr32(nib1),value0 is op8=0x6B & nib1 & value0; Addr32 
+:DEC Addr32(nib1),#value0 is op8=0x6B & nib1 & value0; Addr32 
 {
     local addr:4 = Addr32 + sext(nib1);
     local op1:2 = *[ram]addr;
@@ -1643,7 +1649,7 @@ eval_jp: is cc_jp
 }
 
 # DECB Addr32(rs)
-:DECB Addr32(nib1),value0 is op8=0x6A & nib1 & value0; Addr32 
+:DECB Addr32(nib1),#value0 is op8=0x6A & nib1 & value0; Addr32 
 {
     local addr:4 = Addr32 + sext(nib1);
     local op1:1 = *[ram]addr;
@@ -1653,7 +1659,6 @@ eval_jp: is cc_jp
 	set_zsp_w(res);
 }
 
-# FIXME doesn't display flags properly
 # DI p 88
 # DI: Disable Interrupts
 #:DI int_list is op14=0x1F00 & int_list & int_vi & int_nvi 
@@ -1922,7 +1927,6 @@ eval_jp: is cc_jp
 	if (bnib2 != 0) goto rel7;
 }
 
-# FIXME doesn't display flags properly
 # EI p 93
 # EI: Enable Interrupts
 :EI int_list is op14=0x1F01 & int_list & int_vi & int_nvi 
@@ -2065,7 +2069,7 @@ eval_jp: is cc_jp
 
 # INC p 98
 # INC r1,n
-:INC nib1,value0 is op8=0xA9 & nib1 & value0 
+:INC nib1,#value0 is op8=0xA9 & nib1 & value0 
 {
     local op2:2 = 1 + value0;
     nib1 = nib1 + op2;
@@ -2073,7 +2077,7 @@ eval_jp: is cc_jp
 }
 
 # INCB r1,n
-:INCB bnib1,value0 is op8=0xA8 & bnib1 & value0 
+:INCB bnib1,#value0 is op8=0xA8 & bnib1 & value0 
 {
     local op2:1 = 1 + value0;
     bnib1 = bnib1 + op2;
@@ -2082,7 +2086,7 @@ eval_jp: is cc_jp
 
 # --- indirect reg ---
 # INC @r1
-:INC @dnib1,value0 is op8=0x29 & dnib1 & value0 
+:INC @dnib1,#value0 is op8=0x29 & dnib1 & value0 
 {
     local addr:4 = dnib1;
     local op1:2 = *[ram]addr;
@@ -2093,7 +2097,7 @@ eval_jp: is cc_jp
 }
 
 # INCB @r1
-:INCB @dnib1,value0 is op8=0x28 & dnib1 & value0 
+:INCB @dnib1,#value0 is op8=0x28 & dnib1 & value0 
 {
     local addr:4 = dnib1;
     local op1:1 = *[ram]addr;
@@ -2105,7 +2109,7 @@ eval_jp: is cc_jp
 
 # --- direct address ---
 # INC Addr32
-:INC Addr32,value0 is op8=0x69 & nib1=0 & value0; Addr32 
+:INC Addr32,#value0 is op8=0x69 & nib1=0 & value0; Addr32 
 {
     local op1:2 = *[ram]Addr32;
     local op2:2 = 1 + value0:2;
@@ -2115,7 +2119,7 @@ eval_jp: is cc_jp
 }
 
 # INCB Addr32
-:INCB Addr32,value0 is op8=0x68 & nib1=0 & value0; Addr32 
+:INCB Addr32,#value0 is op8=0x68 & nib1=0 & value0; Addr32 
 {
     local op1:1 = *[ram]Addr32;
     local op2:1 = 1 + value0:1;
@@ -2126,7 +2130,7 @@ eval_jp: is cc_jp
 
 # --- indexed address ---
 # INC Addr32(rs)
-:INC Addr32(nib1),value0 is op8=0x69 & nib1 & value0; Addr32 
+:INC Addr32(nib1),#value0 is op8=0x69 & nib1 & value0; Addr32 
 {
     local addr:4 = Addr32 + sext(nib1);
     local op1:2 = *[ram]addr;
@@ -2137,7 +2141,7 @@ eval_jp: is cc_jp
 }
 
 # INCB Addr32(rs)
-:INCB Addr32(nib1),value0 is op8=0x68 & nib1 & value0; Addr32 
+:INCB Addr32(nib1),#value0 is op8=0x68 & nib1 & value0; Addr32 
 {
     local addr:4 = Addr32 + sext(nib1);
     local op1:1 = *[ram]addr;
@@ -2360,18 +2364,22 @@ eval_jp: is cc_jp
 :JP cc_jp,@dnib1 is op8=0x1E & dnib1 & eval_jp & cc_jp 
 {
 	if (!eval_jp) goto inst_next;
-	goto [dnib1];
+	local target:4 = dnib1;
+	goto [target];
 }
 
 :JP cc_jp,Addr32 is op8=0x5E & nib1=0 & eval_jp & cc_jp; Addr32 
 {
-	if eval_jp goto Addr32;
+	if (!eval_jp) goto inst_next;
+	local target:4 = Addr32;
+    goto [target];
 }
 
 :JP cc_jp,Addr32(nib1) is op8=0x5E & nib1 & eval_jp & cc_jp; Addr32 
 {
 	if (!eval_jp) goto inst_next;
-    goto [Addr32 + sext(nib1)];
+	local target:4 = Addr32 + sext(nib1);
+    goto [target];
 }
 
 # JR p 107
@@ -4427,7 +4435,7 @@ eval_jp: is cc_jp
 }
 
 # TRTDRB p 203
-:TRTDRB @dnib1,@dnib5,nib6 is op8=0xB8 & dnib1 & nib0=0xE; nib7=0 & nib6 & dnib5 & nib4=0
+:TRTDRB @dnib1,@dnib5,nib6 is op8=0xB8 & dnib1 & nib0=0xE; nib7=0 & nib6 & dnib5 & nib4=0xE
 {
     local src1:4 = dnib1;
     local src2:4 = dnib5;
