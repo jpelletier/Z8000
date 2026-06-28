@@ -369,7 +369,8 @@ macro set_rczs_l(result,value)
 
 # ADC, ADD, SBC, SUB
 # Arguments: Destination, Operand1, Operand2, Result, CarryIn
-macro set_fl_8(dst, op1, op2, res, cin) {
+macro set_fl_8(dst, op1, op2, res, cin)
+{
     cf = (res < op1) || ((cin == 1) && (res == op1));
     zf = (res == 0);
     sf = (res >= 0x80);
@@ -379,7 +380,8 @@ macro set_fl_8(dst, op1, op2, res, cin) {
     dst = res;
 }
 
-macro set_fl_16(dst, op1, op2, res, cin) {
+macro set_fl_16(dst, op1, op2, res, cin)
+{
     cf = (res < op1) || ((cin == 1) && (res == op1));
     zf = (res == 0);
     sf = (res >= 0x8000);
@@ -387,7 +389,8 @@ macro set_fl_16(dst, op1, op2, res, cin) {
     dst = res;
 }
 
-macro set_fl_32(dst, op1, op2, res, cin) {
+macro set_fl_32(dst, op1, op2, res, cin)
+{
     cf = (res < op1) || ((cin == 1) && (res == op1));
     zf = (res == 0);
     sf = (res >= 0x80000000);
@@ -397,7 +400,8 @@ macro set_fl_32(dst, op1, op2, res, cin) {
 
 # CP
 # Arguments: Destination, Operand1, Operand2, Result
-macro set2_fl_8(op1, op2, res) {
+macro set2_fl_8(op1, op2, res)
+{
     cf = (res < op1);
     zf = (res == 0);
     sf = (res >= 0x80);
@@ -406,18 +410,36 @@ macro set2_fl_8(op1, op2, res) {
 	hf = (((op1 ^ op2 ^ res) & 0x10) == 0x10);
 }
 
-macro set2_fl_16(op1, op2, res) {
+macro set2_fl_16(op1, op2, res)
+{
     cf = (res < op1);
     zf = (res == 0);
     sf = (res >= 0x8000);
     vf = (((op1 ^ res) & (op2 ^ res)) >= 0x8000);
 }
 
-macro set2_fl_32(op1, op2, res) {
+macro set2_fl_32(op1, op2, res)
+{
     cf = (res < op1);
     zf = (res == 0);
     sf = (res >= 0x80000000);
     vf = (((op1 ^ res) & (op2 ^ res)) >= 0x80000000);
+}
+
+macro setf_mult(res)
+{
+	cf = ((res < -32768) || (res >= 32768));
+	zf = (res == 0:4);
+	sf = (res s< 0:4);
+	vf = 0;
+}
+
+macro setf_multl(res)
+{
+	cf = ((res < -2147483648) || (res >= 2147483648));
+	zf = (res == 0:8);
+	sf = (res s< 0:8);
+	vf = 0;
 }
 
 macro set_zsp_b(result) 
@@ -1643,58 +1665,248 @@ eval_jp: is cc_jp
 
 # DIV p 89
 # --- registers ---
-# DIV rr1.r2
+# DIV rr1,r2
 :DIV dnib0,nib1 is op8=0x9B & nib1 & dnib0 
 {
+	if (nib1 == 0) goto <null_divisor>;
+
+	local quotient:4  = dnib0 / zext(nib1);
+	local remainder:4 = dnib0 % zext(nib1);
+	dnib0[0,16]  = quotient:2;
+	dnib0[16,16] = remainder:2;
+
+	vf = 0;
+	cf = 0;
+	zf = (quotient:2 == 0);
+	sf = ((quotient:2 & 0x8000) == 0x8000);
+	goto inst_next;
+
+<null_divisor>
+	vf = 1;
+	zf = 1;
+	cf = 0;
+	sf = 0;
 }
 
 # DIVL rq1,rr2
 :DIVL qnib0,dnib1 is op8=0x9A & dnib1 & qnib0 
 {
+	if (dnib1 == 0) goto <null_divisor>;
+
+	local quotient:8  = qnib0 / zext(dnib1);
+	local remainder:8 = qnib0 % zext(dnib1);
+	qnib0[0,32]  = quotient:4;
+	qnib0[32,32] = remainder:4;
+
+	vf = 0;
+	cf = 0;
+	zf = (quotient == 0);
+	sf = ((quotient:4 & 0x80000000) == 0x80000000);
+	goto inst_next;
+
+<null_divisor>
+	vf = 1;
+	zf = 1;
+	cf = 0;
+	sf = 0;
 }
 
 # --- immediate ---
 # DIV rr1,#data
 :DIV dnib0,#imm16 is op8=0x1B & nib1=0 & dnib0; imm16 
 {
+	if (imm16:2 == 0) goto <null_divisor>;
+
+	local quotient:4  = dnib0 / zext(imm16:2);
+	local remainder:4 = dnib0 % zext(imm16:2);
+	dnib0[0,16]  = quotient:2;
+	dnib0[16,16] = remainder:2;
+
+	vf = 0;
+	cf = 0;
+	zf = (quotient:2 == 0);
+	sf = ((quotient:2 & 0x8000) == 0x8000);
+	goto inst_next;
+
+<null_divisor>
+	vf = 1;
+	zf = 1;
+	cf = 0;
+	sf = 0;
 }
 
 # DIVL rq1,#data
 :DIVL qnib0,#imm32 is op8=0x1A & nib1=0 & qnib0; imm32 
 {
+	if (imm32:4 == 0) goto <null_divisor>;
+
+	local quotient:8  = qnib0 / zext(imm32:4);
+	local remainder:8 = qnib0 % zext(imm32:4);
+	qnib0[0,32]  = quotient:4;
+	qnib0[32,32] = remainder:4;
+
+	vf = 0;
+	cf = 0;
+	zf = (quotient == 0);
+	sf = ((quotient:4 & 0x80000000) == 0x80000000);
+	goto inst_next;
+
+<null_divisor>
+	vf = 1;
+	zf = 1;
+	cf = 0;
+	sf = 0;
 }
 
 # --- indirect reg ---
 # DIV rr1,@r2
-:DIV dnib0,@nib1 is op8=0x1B & nib1 & dnib0 
+:DIV dnib0,@dnib1 is op8=0x1B & dnib1 & dnib0 
 {
+    local addr:4 = dnib1;
+    local op2:2 = *[ram]:2 addr;
+	if (op2 == 0) goto <null_divisor>;
+
+	local quotient:4  = dnib0 / zext(op2);
+	local remainder:4 = dnib0 % zext(op2);
+	dnib0[0,16]  = quotient:2;
+	dnib0[16,16] = remainder:2;
+
+	vf = 0;
+	cf = 0;
+	zf = (quotient:2 == 0);
+	sf = ((quotient:2 & 0x8000) == 0x8000);
+	goto inst_next;
+
+<null_divisor>
+	vf = 1;
+	zf = 1;
+	cf = 0;
+	sf = 0;
 }
 
 # DIVL rq1,@r2
-:DIVL qnib0,@nib1 is op8=0x1A & nib1 & qnib0 
+:DIVL qnib0,@dnib1 is op8=0x1A & dnib1 & qnib0 
 {
+    local addr:4 = dnib1;
+    local op2:4 = *[ram]:2 addr;
+	if (op2 == 0) goto <null_divisor>;
+
+	local quotient:8  = qnib0 / zext(op2);
+	local remainder:8 = qnib0 % zext(op2);
+	qnib0[0,32]  = quotient:4;
+	qnib0[32,32] = remainder:4;
+
+	vf = 0;
+	cf = 0;
+	zf = (quotient == 0);
+	sf = ((quotient:4 & 0x80000000) == 0x80000000);
+	goto inst_next;
+
+<null_divisor>
+	vf = 1;
+	zf = 1;
+	cf = 0;
+	sf = 0;
 }
 
 # --- direct address ---
 # DIV rr1,address
 :DIV dnib0,Addr32 is op8=0x5B & nib1=0 & dnib0; Addr32 
 {
+    local op2:2 = *[ram]Addr32;
+	if (op2 == 0) goto <null_divisor>;
+
+	local quotient:4  = dnib0 / zext(op2);
+	local remainder:4 = dnib0 % zext(op2);
+	dnib0[0,16]  = quotient:2;
+	dnib0[16,16] = remainder:2;
+
+	vf = 0;
+	cf = 0;
+	zf = (quotient:2 == 0);
+	sf = ((quotient:2 & 0x8000) == 0x8000);
+	goto inst_next;
+
+<null_divisor>
+	vf = 1;
+	zf = 1;
+	cf = 0;
+	sf = 0;
 }
 
 # DIVL rq1,address
 :DIVL qnib0,Addr32 is op8=0x5A & nib1=0 & qnib0; Addr32 
 {
+    local op2:4 = *[ram]Addr32;
+	if (op2 == 0) goto <null_divisor>;
+
+	local quotient:8  = qnib0 / zext(op2);
+	local remainder:8 = qnib0 % zext(op2);
+	qnib0[0,32]  = quotient:4;
+	qnib0[32,32] = remainder:4;
+
+	vf = 0;
+	cf = 0;
+	zf = (quotient == 0);
+	sf = ((quotient:4 & 0x80000000) == 0x80000000);
+	goto inst_next;
+
+<null_divisor>
+	vf = 1;
+	zf = 1;
+	cf = 0;
+	sf = 0;
 }
 
 # --- indexed address ---
 # DIV rr1,addr(r2)
 :DIV dnib0,Addr32(nib1) is op8=0x5B & nib1 & dnib0; Addr32 
 {
+    local addr:4 = Addr32 + sext(nib1);
+    local op2:2 = *[ram]addr;
+	if (op2 == 0) goto <null_divisor>;
+
+	local quotient:4  = dnib0 / zext(op2);
+	local remainder:4 = dnib0 % zext(op2);
+	dnib0[0,16]  = quotient:2;
+	dnib0[16,16] = remainder:2;
+
+	vf = 0;
+	cf = 0;
+	zf = (quotient:2 == 0);
+	sf = ((quotient:2 & 0x8000) == 0x8000);
+	goto inst_next;
+
+<null_divisor>
+	vf = 1;
+	zf = 1;
+	cf = 0;
+	sf = 0;
 }
 
 # DIVL rq1,addr(r2)
 :DIVL qnib0,Addr32(nib1) is op8=0x5A & nib1 & qnib0; Addr32 
 {
+    local addr:4 = Addr32 + sext(nib1);
+    local op2:4 = *[ram]addr;
+	if (op2 == 0) goto <null_divisor>;
+
+	local quotient:8  = qnib0 / zext(op2);
+	local remainder:8 = qnib0 % zext(op2);
+	qnib0[0,32]  = quotient:4;
+	qnib0[32,32] = remainder:4;
+
+	vf = 0;
+	cf = 0;
+	zf = (quotient == 0);
+	sf = ((quotient:4 & 0x80000000) == 0x80000000);
+	goto inst_next;
+
+<null_divisor>
+	vf = 1;
+	zf = 1;
+	cf = 0;
+	sf = 0;
 }
 
 # DJNZ p 92
@@ -2774,38 +2986,98 @@ eval_jp: is cc_jp
 # MULT p 141
 # --- registers  ---
 # MULT rr1,r2
-:MULT dnib0,nib1 is op8=0x99 & nib1 & dnib0 {}
+:MULT dnib0,nib1 is op8=0x99 & nib1 & dnib0
+{
+	res:4 = sext(dnib0:2 * nib1);
+	dnib0 = res;
+	setf_mult(res);
+}
 
 # MULTL rq1,rr2
-:MULTL qnib0,dnib1 is op8=0x98 & dnib1 & qnib0 {}
+:MULTL qnib0,dnib1 is op8=0x98 & dnib1 & qnib0
+{
+	res:8 = sext(qnib0:4 * dnib1);
+	qnib0 = res;
+	setf_multl(res);
+}
 
 # --- immediate ---
 # MULT rr1,#data
-:MULT dnib0,#imm16 is op8=0x19 & nib1=0 & dnib0; imm16 {}
+:MULT dnib0,#imm16 is op8=0x19 & nib1=0 & dnib0; imm16
+{
+	res:4 = sext(dnib0:2 * imm16);
+	dnib0 = res;
+	setf_mult(res);
+}
 
 # MULTL rq1,#data
-:MULTL qnib0,#imm32 is op8=0x18 & nib1=0 & qnib0; imm32 {}
+:MULTL qnib0,#imm32 is op8=0x18 & nib1=0 & qnib0; imm32
+{
+	res:8 = sext(qnib0:4 * imm32);
+	qnib0 = res;
+	setf_multl(res);
+}
 
 # --- indirect ---
 # MULT rr1,@r2
-:MULT dnib0,@dnib1 is op8=0x19 & dnib1 & dnib0 {}
+:MULT dnib0,@dnib1 is op8=0x19 & dnib1 & dnib0
+{
+    local addr:4 = dnib1;
+    local op2:2 = *[ram]:2 addr;
+	res:4 = sext(dnib0:2 * op2);
+	dnib0 = res;
+	setf_mult(res);
+}
 
 # MULTL rq1,@r2
-:MULTL qnib0,@dnib1 is op8=0x18 & dnib1 & qnib0 {}
+:MULTL qnib0,@dnib1 is op8=0x18 & dnib1 & qnib0
+{
+    local addr:4 = dnib1;
+    local op2:4 = *[ram]:2 addr;
+	res:8 = sext(qnib0:4 * op2);
+	qnib0 = res;
+	setf_multl(res);
+}
 
 # --- direct address ---
 # MULT rr1,address
-:MULT dnib0,Addr32 is op8=0x59 & nib1=0 & dnib0; Addr32 {}
+:MULT dnib0,Addr32 is op8=0x59 & nib1=0 & dnib0; Addr32
+{
+    local op2:2 = *[ram]Addr32;
+	res:4 = sext(dnib0:2 * op2);
+	dnib0 = res;
+	setf_mult(res);
+}
 
 # MULTL rq1,address
-:MULTL qnib0,Addr32 is op8=0x58 & nib1=0 & qnib0; Addr32 {}
+:MULTL qnib0,Addr32 is op8=0x58 & nib1=0 & qnib0; Addr32
+{
+    local op2:4 = *[ram]Addr32;
+	res:8 = sext(qnib0:4 * op2);
+	qnib0 = res;
+	setf_multl(res);
+}
 
 # --- indexed address ---
 # MULT rr1,addr(r2)
-:MULT dnib0,Addr32(nib1) is op8=0x59 & nib1 & dnib0; Addr32 {}
+:MULT dnib0,Addr32(nib1) is op8=0x59 & nib1 & dnib0; Addr32
+{
+    local addr:4 = Addr32 + sext(nib1);
+    local op2:2 = *[ram]addr;
+	res:4 = sext(dnib0:2 * op2);
+	dnib0 = res;
+	setf_mult(res);
+}
 
 # MULTL rq1,addr(r2)
-:MULTL qnib0,Addr32(nib1) is op8=0x58 & nib1 & qnib0; Addr32 {}
+:MULTL qnib0,Addr32(nib1) is op8=0x58 & nib1 & qnib0; Addr32
+{
+    local addr:4 = Addr32 + sext(nib1);
+    local op2:4 = *[ram]addr;
+	res:8 = sext(qnib0:4 * op2);
+	qnib0 = res;
+	setf_multl(res);
+}
 
 # ---------------------------------------------------------
 # NEG p 144
