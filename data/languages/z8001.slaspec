@@ -2889,58 +2889,127 @@ eval_jp: is cc_jp
 :LDK nib1,#value0 is op8=0xBD & nib1 & value0 { nib1 = value0; }
 
 # LDM p 130
-# FIXME ASSEMBLER #7 DISASSEMBLER #6
 # FIXME how to increment register number (nib6 = R0 to R15), not its content
 # --- indirect ---
 # LDM r1,@r2,#n
 :LDM nib6,dnib1,#value0 is op8=0x1C & dnib1 & nib0=0x1; nib7=0 & nib6 &nib5=0 & value0
 {
-#	local nb:1 = value0:1+1;
-#<ldm_loop>
-#	nib6 = *[ram]:2 dnib1;		
-#	dnib1 = dnib1+1;
-#	nb = nb-1;
-#	if (nb != 0) goto <ldm_loop>;
+	local nb:1 = value0:1+1;
+<ldm_loop>
+    local src:4 = dnib1;
+	local dst:2 = nib6;
+#	*[register]:2 dst = *[ram]:2 src;
+	src = src+1;
+	dst = dst+1;
+	nb = nb-1;
+	if (nb != 0) goto <ldm_loop>;
 }
 
 # --- direct address ---
 # LDM r1,address,#n
-:LDM nib6,Addr32,#value0 is op16=0x5C01; nib7=0 & nib6 & nib5=0 & value0; Addr32 { }
+:LDM nib6,Addr32,#value0 is op16=0x5C01; nib7=0 & nib6 & nib5=0 & value0; Addr32
+{
+	local nb:1 = value0:1+1;
+<ldm_loop>
+    local src:4 = Addr32;
+	local dst:2 = nib6;
+#	*[register]:2 dst = *[ram]:2 src;
+	src = src+1;
+	dst = dst+1;
+	nb = nb-1;
+	if (nb != 0) goto <ldm_loop>;
+}
 
 # --- indexed address ---
 # LDM r1,Addr32(r1),#n
-:LDM nib6,Addr32(nib1),#value0 is op8=0x5C & nib1 & nib0=0x1; nib7=0 & nib6 & nib5=0 & value0; Addr32 {}
+:LDM nib6,Addr32(nib1),#value0 is op8=0x5C & nib1 & nib0=0x1; nib7=0 & nib6 & nib5=0 & value0; Addr32
+{
+	local nb:1 = value0:1+1;
+<ldm_loop>
+    local src:4 = Addr32 + sext(nib1);
+	local dst:2 = nib6;
+#	nib6 = *[ram]:2 src;
+	src = src+1;
+	dst = dst+1;
+	nb = nb-1;
+	if (nb != 0) goto <ldm_loop>;
+}
 
 # --- indirect ---
 # LDM @r1,r2,#n
-:LDM dnib1,nib6,#value0 is op8=0x1C & dnib1 & nib0=0x9; nib7=0 & nib6 &nib5=0 & value0 { }
+:LDM dnib1,nib6,#value0 is op8=0x1C & dnib1 & nib0=0x9; nib7=0 & nib6 &nib5=0 & value0
+{
+	local nb:1 = value0:1+1;
+<ldm_loop>
+	local src:2 = nib6;
+    local dst:4 = dnib1;
+#	nib6 = *[ram]:2 dst;
+	src = src+1;
+	dst = dst+1;
+	nb = nb-1;
+	if (nb != 0) goto <ldm_loop>;
+}
 
 # --- direct address ---
 # LDM Addr32,r1,#n
-:LDM Addr32,nib6,#value0 is op16=0x5C09; nib7=0 & nib6 & nib5=0 & value0; Addr32 { }
+:LDM Addr32,nib6,#value0 is op16=0x5C09; nib7=0 & nib6 & nib5=0 & value0; Addr32
+{
+	local nb:1 = value0:1+1;
+<ldm_loop>
+	local src:2 = nib6;
+    local dst:4 = Addr32;
+#	 = *[ram]:2 dst = 
+	src = src+1;
+	dst = dst+1;
+	nb = nb-1;
+	if (nb != 0) goto <ldm_loop>;
+}
 
 # --- indexed address ---
 # LDM Addr32(r1),r2,#n
-:LDM Addr32(nib1),nib6,#value0 is op8=0x5C & nib1 & nib0=0x9; nib7=0 & nib6 & nib5=0 & value0; Addr32 {}
+:LDM Addr32(nib1),nib6,#value0 is op8=0x5C & nib1 & nib0=0x9; nib7=0 & nib6 & nib5=0 & value0; Addr32
+{
+	local nb:1 = value0:1+1;
+<ldm_loop>
+    local addr:4 = Addr32 + sext(nib1);
+	local src:2 = nib6;
+    local dst:4 = *[ram]:4 addr;
+#	*[ram]:2 dst = ;
+	src = src+1;
+	dst = dst+1;
+	nb = nb-1;
+	if (nb != 0) goto <ldm_loop>;
+}
 
 # LDPS p 133
+# FIXME verify if PC and FSW are loaded correcly
 # --- indirect ---
 # LDPS @rr1
 :LDPS dnib1 is op8=0x39 & dnib1 & nib0=0
 {
-#    local src = dnib1;
-	# FIXME verify if PC and FSW are loaded correcly
-#	pc = *[ram]src;
-#	FSW = *[ram](src+2);
+    local src:4 = dnib1;
+	pc = *[ram]:2 src;
+	FSW = *[ram]:2 (src+2);
 }
 
 # --- direct address ---
 # LDPS Addr32
-:LDPS Addr32 is op16=0x7900; Addr32 { }
+:LDPS Addr32 is op16=0x7900; Addr32
+{
+    local src:4 = Addr32;
+	pc = *[ram]:2 src;
+	FSW = *[ram]:2 (src+2);
+}
 
 # --- indexed address ---
 # LDPS Addr32(r1)
-:LDPS Addr32(nib1) is op8=0x79 & nib1 & nib0=0; Addr32 {}
+:LDPS Addr32(nib1) is op8=0x79 & nib1 & nib0=0; Addr32
+{
+    local addr:4 = Addr32 + sext(nib1);
+    local src:4 = *[ram]:4 addr;
+	pc = *[ram]:2 src;
+	FSW = *[ram]:2 (src+2);
+}
 
 # LDR p 134
 :LDR nib0, rel16   is op8=0x31 & nib1=0 & nib0; rel16
