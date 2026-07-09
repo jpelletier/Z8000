@@ -7,6 +7,7 @@
 	version="1.0"
 	slafile="z8001.sla"
 	processorspec="z8001.pspec"
+	manualindexfile="../../manuals/Z8001.idx"
 	id="Z8000:BE:16:Z8001">
     	<description>Zilog Z8001 16-bit Segmented CPU</description>
 	<compiler name="default" spec="z8001.cspec" id="default"/>
