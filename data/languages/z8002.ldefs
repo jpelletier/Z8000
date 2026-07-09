@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<language_definitions>
+    <language processor="Z8000"
+    	endian="big"
+	size="16"
+	variant="Z8002"
+	version="1.0"
+	slafile="z8002.sla"
+	processorspec="z8002.pspec"
+	manualindexfile="../../manuals/Z8001.idx"
+	id="Z8000:BE:16:Z8002">
+    	<description>Zilog Z8002 16-bit Non-Segmented CPU</description>
+	<compiler name="default" spec="z8002.cspec" id="default"/>
+    </language>
+</language_definitions>
+
