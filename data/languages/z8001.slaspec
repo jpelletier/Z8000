@@ -2169,7 +2169,7 @@ eval_jp: is cc_jp
     local src:2 = nib1;
 
 	IoRead(src,*[ram]:1 dst);
-	dnib5 = dnib5+1;
+	dnib5 = dnib5-1;
 	nib6 = nib6-1;
 	vf = (nib6 == 0);
 }
@@ -2191,7 +2191,7 @@ eval_jp: is cc_jp
     local src:2 = nib1;
 
 	IoRead(src,*[ram]:1 dst);
-	dnib5 = dnib5+1;
+	dnib5 = dnib5-1;
 	nib6 = nib6-1;
 	vf = (nib6 == 0);
 }
@@ -2361,6 +2361,24 @@ eval_jp: is cc_jp
 }
 
 # JP p 106
+:JP @dnib1 is op8=0x1E & dnib1 & cc_jp=0x8
+{
+	local target:4 = dnib1;
+	goto [target];
+}
+
+:JP Addr32 is op8=0x5E & nib1=0 & cc_jp=0x8; Addr32 
+{
+	local target:4 = Addr32;
+    goto [target];
+}
+
+:JP Addr32(nib1) is op8=0x5E & nib1 & cc_jp=0x8; Addr32 
+{
+	local target:4 = Addr32 + sext(nib1);
+    goto [target];
+}
+
 :JP cc_jp,@dnib1 is op8=0x1E & dnib1 & eval_jp & cc_jp 
 {
 	if (!eval_jp) goto inst_next;
@@ -2897,10 +2915,11 @@ eval_jp: is cc_jp
 	local nb:1 = value0:1+1;
 <ldm_loop>
     local src:4 = dnib1;
-	local dst:2 = nib6;
-#	*[register]:2 dst = *[ram]:2 src;
-	src = src+1;
-	dst = dst+1;
+	local dst:2 = nib6 * 2;
+	local tmp:2 = *[ram]:2 src;
+#	*[register]:1 dst = tmp:2;
+	src = src+2;
+	dst = dst+2;
 	nb = nb-1;
 	if (nb != 0) goto <ldm_loop>;
 }
@@ -2913,7 +2932,8 @@ eval_jp: is cc_jp
 <ldm_loop>
     local src:4 = Addr32;
 	local dst:2 = nib6;
-#	*[register]:2 dst = *[ram]:2 src;
+	local tmp:2 = *[ram]:2 src;
+#	*[register]:2 dst
 	src = src+1;
 	dst = dst+1;
 	nb = nb-1;
@@ -2928,6 +2948,7 @@ eval_jp: is cc_jp
 <ldm_loop>
     local src:4 = Addr32 + sext(nib1);
 	local dst:2 = nib6;
+	local tmp:2 = *[ram]:2 src;
 #	nib6 = *[ram]:2 src;
 	src = src+1;
 	dst = dst+1;
@@ -2943,6 +2964,7 @@ eval_jp: is cc_jp
 <ldm_loop>
 	local src:2 = nib6;
     local dst:4 = dnib1;
+#	local tmp:2 = *[ram]:2 src;
 #	nib6 = *[ram]:2 dst;
 	src = src+1;
 	dst = dst+1;
@@ -2958,7 +2980,8 @@ eval_jp: is cc_jp
 <ldm_loop>
 	local src:2 = nib6;
     local dst:4 = Addr32;
-#	 = *[ram]:2 dst = 
+#	local tmp:2 = *[ram]:2 src;
+#	*[ram]:2 dst = 
 	src = src+1;
 	dst = dst+1;
 	nb = nb-1;
@@ -2974,6 +2997,7 @@ eval_jp: is cc_jp
     local addr:4 = Addr32 + sext(nib1);
 	local src:2 = nib6;
     local dst:4 = *[ram]:4 addr;
+#	local tmp:2 = *[ram]:2 src;
 #	*[ram]:2 dst = ;
 	src = src+1;
 	dst = dst+1;
